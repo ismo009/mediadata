@@ -1,181 +1,184 @@
-# Studio Ops Dashboard
+# Studio Ops — Production Dashboard & Assistant IA
 
-Dashboard local de production connecté à ShotGrid (Flow Production Tracking),
-Ollama et, en option, Google Drive.
+Dashboard local moderne de supervision de studio VFX / Animation connecté à **Autodesk ShotGrid** (Flow Production Tracking), **Ollama** (LLM local) et, en option, **Google Drive**.
 
-L'application fournit :
+L'application associe un backend haute performance sous **FastAPI** et **SQLite (FTS5)** à une interface réactive développée en **React (Vite)**.
 
-- une interface web organisée par projets ;
-- des indicateurs de production et des cartes projet ;
-- l'affichage détaillé des Shots, Tasks, Assets, Versions et Notes ;
-- des liens directs vers les fiches ShotGrid ;
-- une synchronisation manuelle vers une base SQLite locale ;
-- un assistant IA Ollama capable d'interroger les données synchronisées ;
-- un historique de conversation pour les questions de suivi ;
-- une interface responsive pour ordinateur, tablette et mobile.
+---
 
-> **État actuel :** la synchronisation et l'interface sont en lecture seule.
-> Le dashboard ne crée ni ne modifie encore de données ShotGrid.
+## 🌟 Fonctionnalités
 
-## Architecture
+- **Interface React moderne** : navigation fluide par projet, shots, tâches, notes, versions et assets.
+- **Cartes KPI & Supervision** : suivi instantané des projets actifs, volumes de tâches et dernière synchronisation.
+- **Explorateur Master-Detail** : consultation d'un projet avec onglets dédiés (*Tâches*, *Shots*, *Notes*, *Versions*, *Assets*) et liens directs vers ShotGrid.
+- **Grille de données paginée (DataGrid)** : recherche instantanée, filtres par statut et pagination serveur pour naviguer confortablement dans plus de 16 000 enregistrements.
+- **Assistant IA en Streaming temps réel (SSE)** : réponses mot-par-mot propulsées par Ollama, rendu Markdown complet, accordéon des sources consultées et sélecteur de modèle.
+- **Moteur de recherche Full-Text (SQLite FTS5)** : indexation ultra-rapide des notes, descriptions et noms.
+- **Synchronisation ShotGrid en arrière-plan** : cache local structuré et indexé, sans bloquer l'interface.
+
+---
+
+## 🏗️ Architecture
 
 ```text
-Navigateur
-    |
-    v
-FastAPI + Uvicorn
-    |              \
-    v               v
-ShotGrid API      Ollama
-    |
-    v
-SQLite (dashboard.sqlite3)
+       Navigateur Web (React + Vite)
+                     │
+       (HTTP REST & Server-Sent Events)
+                     │
+                     ▼
+          Backend FastAPI (Uvicorn)
+         ┌───────────┼───────────┐
+         ▼           ▼           ▼
+   Autodesk       Ollama    Google Drive
+   ShotGrid     (LLM Local)  (Optionnel)
+         │
+         ▼
+  SQLite 3 (B-Tree + FTS5 Full-Text)
 ```
 
-- [`index.html`](./index.html) : interface du dashboard et assistant IA.
-- [`backend/main.py`](./backend/main.py) : API FastAPI, synchronisation,
-  recherche et connexion aux services.
-- [`test_api_rest.py`](./test_api_rest.py) : test direct de connexion ShotGrid.
-- [`requirements.txt`](./requirements.txt) : dépendances Python.
-- [`.env.example`](./.env.example) : modèle de configuration.
-- `dashboard.sqlite3` : cache local créé automatiquement.
+### Arborescence du projet
 
-## Pré-requis
+```text
+html_server/
+├── README.md               # Documentation du projet
+├── requirements.txt        # Dépendances Python (FastAPI, ShotGrid, etc.)
+├── .env.example            # Modèle des variables d'environnement
+├── .gitignore              # Protection des secrets et fichiers générés
+├── test_api_rest.py        # Script de test de connexion ShotGrid
+├── dashboard.sqlite3       # Base SQLite locale (indexée + FTS5)
+│
+├── backend/
+│   ├── __init__.py
+│   ├── main.py             # API FastAPI, streaming SSE, cache & RAG
+│   └── migrate_db.py       # Script d'indexation et migration FTS5
+│
+└── frontend/               # Application React moderne
+    ├── package.json        # Dépendances NPM (React, Lucide, React-Markdown)
+    ├── vite.config.js      # Configuration Vite avec proxy backend
+    ├── index.html          # Point d'entrée HTML
+    ├── dist/               # Build de production (servi par FastAPI)
+    └── src/
+        ├── App.jsx         # Composant racine et gestion d'état
+        ├── api.js          # Client HTTP et streaming SSE
+        ├── index.css       # Design System sombre pour studio
+        └── components/
+            ├── Sidebar.jsx           # Barre latérale & statut sync
+            ├── DashboardOverview.jsx # KPIs & grille de projets
+            ├── ProjectDetail.jsx     # Vue détaillée par projet (onglets)
+            ├── EntityTable.jsx       # Tableau paginé avec filtres
+            └── ChatAssistant.jsx     # Assistant IA conversationnel en streaming
+```
 
-- macOS, Linux ou Windows ;
-- Python 3.9 ou supérieur ;
-- un accès ShotGrid ;
-- Ollama installé et lancé ;
-- un modèle Ollama installé, par exemple `llama3.1`.
+---
 
-Vérifier Python et Ollama :
+## 📋 Prérequis
 
+- **macOS**, **Linux** ou **Windows**
+- **Python 3.9+**
+- **Node.js 18+** & **npm** (installé sur le Mac : v26.11 / npm 11)
+- **Ollama** lancé localement avec au moins un modèle (ex: `llama3.1`, `mistral`, etc.)
+- Un accès à un site **Autodesk ShotGrid**
+
+Vérifiez vos installations :
 ```bash
 python3 --version
+node -v
+npm -v
 ollama list
 ```
 
-## Installation
+---
 
-Depuis le dossier du projet :
+## ⚙️ Installation & Configuration
+
+### 1. Dépendances Python
 
 ```bash
 cd /Users/lolot/html_server
 python3 -m pip install -r requirements.txt
+```
+
+### 2. Dépendances Frontend
+
+```bash
+cd frontend
+npm install
+npm run build
+cd ..
+```
+
+### 3. Fichier d'environnement (`.env`)
+
+Copiez le modèle et renseignez vos identifiants :
+```bash
 cp .env.example .env
 ```
 
-Ne versionne ou ne partage jamais `.env`. Il contient des identifiants
-ShotGrid et peut contenir des jetons Google.
-
-## Configuration
-
-Édite `.env` :
-
+Modifiez `.env` avec vos accès :
 ```env
-APP_SECRET=une-valeur-secrete-longue
+APP_SECRET=votre-cle-secrete-longue
 APP_BASE_URL=http://localhost:8000
 
+# Ollama
 OLLAMA_URL=http://localhost:11434
 OLLAMA_MODEL=llama3.1:latest
 
+# Autodesk ShotGrid
 SHOTGRID_SERVER_URL=https://votre-site.shotgrid.autodesk.com
-SHOTGRID_LOGIN=login-legacy-shotgrid
-SHOTGRID_PASSPHRASE=passphrase-legacy-shotgrid
-SHOTGRID_PAT=pat-shotgrid
+SHOTGRID_LOGIN=votre_login
+SHOTGRID_PASSPHRASE=votre_passphrase
+SHOTGRID_PAT=votre_pat
+
+# Ou authentification par Script (alternative) :
+# SHOTGRID_SCRIPT_NAME=mon_script
+# SHOTGRID_SCRIPT_KEY=ma_cle_api
+
+# Google Drive (Optionnel)
+# GOOGLE_ACCESS_TOKEN=token-drive-si-disponible
 ```
 
-### Authentification ShotGrid
+> ⚠️ **Sécurité** : Le fichier `.env` et la base `dashboard.sqlite3` sont exclus de Git via `.gitignore`. Ne committez jamais vos secrets.
 
-Le fonctionnement actuel utilise le login legacy et la passphrase :
+---
 
-- `SHOTGRID_LOGIN` : identifiant exact du compte ShotGrid ;
-- `SHOTGRID_PASSPHRASE` : passphrase legacy ;
-- `SHOTGRID_PAT` : PAT lié au site, conservé dans la configuration.
+## 🚀 Démarrage
 
-Le mode script est également pris en charge en secours :
+### Option A : Mode Standard / Production (Recommandé)
 
-```env
-SHOTGRID_SCRIPT_NAME=nom-du-script
-SHOTGRID_SCRIPT_KEY=cle-api-du-script
-```
-
-Ne mets jamais de vraies clés dans ce README.
-
-### Google Drive
-
-Google Drive est optionnel. Pour la bêta locale, un token peut être fourni :
-
-```env
-GOOGLE_ACCESS_TOKEN=token-google
-```
-
-La configuration OAuth complète utilise aussi :
-
-```env
-GOOGLE_CLIENT_ID=
-GOOGLE_CLIENT_SECRET=
-GOOGLE_REDIRECT_URI=http://localhost:8000/auth/google/callback
-```
-
-## Lancement local
+FastAPI sert directement l'interface React compilée :
 
 ```bash
-cd /Users/lolot/html_server
 python3 -m uvicorn backend.main:app --reload --port 8000
 ```
 
-Ouvre ensuite :
+Ouvrez ensuite dans votre navigateur :
+👉 **`http://localhost:8000`**
 
-<http://localhost:8000>
+### Option B : Mode Développement Frontend (Hot-Reload)
 
-Le serveur sert automatiquement `index.html`.
+Pour modifier les composants React avec rechargement instantané :
 
-## Accès depuis une tablette ou un autre ordinateur
+1. **Terminal 1 (Backend FastAPI)** :
+   ```bash
+   python3 -m uvicorn backend.main:app --reload --port 8000
+   ```
 
-Le serveur doit écouter sur toutes les interfaces réseau :
+2. **Terminal 2 (Serveur Vite)** :
+   ```bash
+   cd frontend
+   npm run dev
+   ```
+   👉 Ouvrez **`http://localhost:5173`** *(tous les appels `/api` et `/auth` sont automatiquement redirigés vers FastAPI sur le port 8000)*.
 
-```bash
-python3 -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
-```
+---
 
-Trouver l'adresse IP du Mac :
+## 🔄 Synchronisation ShotGrid
 
-```bash
-ipconfig getifaddr en0
-```
+1. Lancez le serveur et ouvrez l'interface.
+2. Dans le panneau latéral gauche en bas, cliquez sur l'icône de rafraîchissement à côté de **ShotGrid Sync**.
+3. La synchronisation s'exécute en tâche de fond (`completed` dès que terminée).
 
-Puis ouvrir depuis le même réseau Wi-Fi :
-
-```text
-http://ADRESSE_IP_DU_MAC:8000
-```
-
-Pour Ollama, `localhost` ne convient pas sur la tablette : il désigne la
-tablette elle-même. Lance Ollama sur le réseau local :
-
-```bash
-OLLAMA_HOST=0.0.0.0:11434 OLLAMA_ORIGINS="*" ollama serve
-```
-
-Dans les réglages du dashboard, utilise :
-
-```text
-http://ADRESSE_IP_DU_MAC:11434
-```
-
-Les appareils doivent être sur le même réseau et le pare-feu macOS doit
-autoriser Python et Ollama.
-
-## Synchroniser ShotGrid
-
-1. Lance le serveur.
-2. Ouvre le dashboard.
-3. Clique sur **Synchroniser ShotGrid**.
-4. Attends l'état `completed`.
-
-La synchronisation s'exécute en arrière-plan et récupère les entités suivantes :
-
+Entités synchronisées :
 - `Project`
 - `Shot`
 - `Task`
@@ -184,129 +187,62 @@ La synchronisation s'exécute en arrière-plan et récupère les entités suivan
 - `HumanUser`
 - `Note`
 
-Tous les champs disponibles dans le schéma ShotGrid sont stockés sous forme
-JSON dans SQLite. La synchronisation est progressive et son état est visible
-dans le dashboard.
-
-La base locale est :
-
-```text
-dashboard.sqlite3
-```
-
-Pour repartir d'un cache vide, arrête le serveur puis supprime uniquement ce
-fichier :
-
+Pour forcer une réindexation SQLite et FTS5 manuelle :
 ```bash
-rm dashboard.sqlite3
+python3 backend/migrate_db.py
 ```
 
-Il sera recréé au prochain démarrage.
+---
 
-## API disponible
+## 🤖 Assistant IA & RAG
+
+L'assistant intelligent situé dans le volet droit :
+- Analyse votre question et extrait les entités pertinentes via la recherche **SQLite FTS5** et la base relationnelle.
+- Épure le JSON transmis au LLM pour éviter d'engorger la fenêtre de tokens.
+- Streame la réponse en direct via Server-Sent Events (**SSE**).
+- Affiche un accordéon des **sources consultées** avec liens cliquables vers ShotGrid.
+- Permet de changer de modèle Ollama à la volée depuis le menu déroulant.
+
+---
+
+## 🔌 Référence de l'API REST
 
 | Méthode | Route | Description |
 |---|---|---|
-| `GET` | `/api/health` | Vérifie que le backend répond |
-| `GET` | `/api/dashboard` | Indicateurs et projets |
-| `GET` | `/api/projects/{id}` | Détails et entités liées d'un projet |
-| `POST` | `/api/sync` | Lance une synchronisation en arrière-plan |
-| `GET` | `/api/sync/status` | État de la dernière synchronisation |
-| `GET` | `/api/data/{entity}` | Données en cache d'une entité |
-| `POST` | `/api/query` | Question à l'assistant IA |
-| `GET` | `/auth/google/login` | Démarre Google OAuth |
-| `GET` | `/auth/google/callback` | Retour OAuth Google |
-| `POST` | `/auth/logout` | Ferme la session |
-| `GET` | `/api/me` | Utilisateur connecté |
+| `GET` | `/api/health` | Vérifie l'état de l'API (`{"status": "ok"}`) |
+| `GET` | `/api/models` | Liste les modèles Ollama installés localement |
+| `GET` | `/api/dashboard` | Métriques globales et liste des projets |
+| `GET` | `/api/projects/{id}` | Détail complet d'un projet et ses entités liées |
+| `GET` | `/api/data/{entity}` | Données paginées (`?page=1&limit=50&search=...&status=...`) |
+| `POST` | `/api/sync` | Lance une synchronisation ShotGrid en arrière-plan |
+| `GET` | `/api/sync/status` | Statut de la dernière synchronisation |
+| `POST` | `/api/query/stream` | Requête assistant IA en **streaming SSE** |
+| `POST` | `/api/query` | Requête assistant IA standard (compatibilité JSON) |
+| `GET` | `/auth/google/login` | Initialisation de la connexion Google OAuth |
+| `GET` | `/auth/google/callback` | Callback de redirection Google |
+| `POST` | `/auth/logout` | Déconnexion |
+| `GET` | `/api/me` | Informations de session utilisateur |
 
-Exemple :
+---
 
+## 🛠️ Dépannage rapide
+
+### `zsh: command not found: uvicorn`
+Utilisez la syntaxe module Python :
 ```bash
-curl http://localhost:8000/api/health
-curl http://localhost:8000/api/sync/status
-curl 'http://localhost:8000/api/data/projects?limit=10'
+python3 -m uvicorn backend.main:app --reload --port 8000
 ```
-
-Question à l'assistant :
-
-```bash
-curl -X POST http://localhost:8000/api/query \
-  -H 'Content-Type: application/json' \
-  -d '{"question":"Quels sont les projets actifs ?","history":[]}'
-```
-
-## Tester ShotGrid directement
-
-Le script de test charge `.env` automatiquement :
-
-```bash
-python3 test_api_rest.py
-```
-
-Il vérifie l'authentification puis affiche le nombre d'utilisateurs actifs et
-les projets accessibles.
-
-## Assistant IA
-
-L'assistant :
-
-- utilise le modèle défini par `OLLAMA_MODEL` ;
-- reçoit les données ShotGrid trouvées dans le cache ;
-- conserve les derniers messages de la conversation ;
-- reconnaît les projets par nom et identifiant ;
-- recherche les Tasks, Shots, Notes et autres entités liées ;
-- fournit les liens `source_url` vers ShotGrid quand ils existent ;
-- doit répondre uniquement avec les informations présentes dans les sources.
-
-Si une réponse semble incorrecte :
-
-1. vérifie que la synchronisation est terminée ;
-2. synchronise à nouveau ShotGrid ;
-3. recharge la page avec `Cmd + Shift + R` ;
-4. pose une question contenant le nom exact du projet ou l'identifiant de
-   l'entité.
-
-## Sécurité
-
-Cette version est prévue pour un réseau local de développement :
-
-- ne publie pas le port `8000` sur Internet ;
-- ne partage jamais `.env`, un PAT, une passphrase ou un token Google ;
-- régénère tout secret exposé ;
-- n'utilise pas `OLLAMA_ORIGINS="*"` sur un serveur public ;
-- la gestion fine des permissions utilisateurs n'est pas encore activée ;
-- les modifications ShotGrid depuis le dashboard ne sont pas encore activées.
-
-## Dépannage
-
-### `uvicorn: command not found`
-
-Utilise le module Python :
-
-```bash
-python3 -m uvicorn backend.main:app --port 8000
-```
+*(Ou ajoutez `export PATH="$HOME/Library/Python/3.9/bin:$PATH"` dans votre `~/.zshrc`)*.
 
 ### `Ollama est indisponible`
-
-Vérifie le modèle et le service :
-
+Vérifiez qu'Ollama est bien démarré :
 ```bash
-ollama list
 curl http://localhost:11434/api/tags
 ```
 
-### La tablette ne peut pas ouvrir le dashboard
-
-Lance Uvicorn avec `--host 0.0.0.0`, vérifie l'IP du Mac, le même réseau Wi-Fi
-et le pare-feu.
-
-### La synchronisation semble lente
-
-Une synchronisation complète peut récupérer plusieurs milliers
-d'enregistrements. Elle s'exécute en arrière-plan ; consulte le statut dans le
-dashboard ou :
-
+### Le frontend React ne reflète pas les dernières modifications
+Recompilez les assets :
 ```bash
-curl http://localhost:8000/api/sync/status
+cd frontend && npm run build
 ```
+Puis faites un rafraîchissement complet dans le navigateur avec `Cmd + Shift + R`.
