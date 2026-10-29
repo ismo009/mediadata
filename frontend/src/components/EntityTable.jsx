@@ -46,16 +46,16 @@ export default function EntityTable({ entity, entityTitle }) {
         <div>
           <h2 style={styles.title}>{entityTitle}</h2>
           <p style={styles.subtitle}>
-            {data.total.toLocaleString()} enregistrements trouvés
+            {data.total.toLocaleString()} enregistrements indexés dans le cache
           </p>
         </div>
 
         <div style={styles.controls}>
           <div style={styles.searchWrap}>
-            <Search size={15} color="var(--text-muted)" style={styles.searchIcon} />
+            <Search size={15} color="var(--text-sub)" style={styles.searchIcon} />
             <input
               type="text"
-              placeholder={`Rechercher ${entityTitle.toLowerCase()}...`}
+              placeholder={`Filtrer les ${entityTitle.toLowerCase()}...`}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               style={styles.searchInput}
@@ -63,7 +63,7 @@ export default function EntityTable({ entity, entityTitle }) {
           </div>
 
           <div style={styles.filterWrap}>
-            <Filter size={14} color="var(--text-muted)" />
+            <Filter size={14} color="var(--text-sub)" />
             <select
               value={status}
               onChange={(e) => {
@@ -84,26 +84,26 @@ export default function EntityTable({ entity, entityTitle }) {
         </div>
       </div>
 
-      {/* Table Content */}
+      {/* Table Card */}
       <div style={styles.tableCard}>
         {loading ? (
           <div style={styles.loadingContainer}>
-            <Loader2 size={28} className="spin" color="var(--accent)" />
+            <Loader2 size={30} className="spin" color="var(--accent)" />
           </div>
         ) : data.records.length === 0 ? (
           <div style={styles.emptyContainer}>
-            Aucun enregistrement correspondant.
+            Aucun enregistrement ne correspond aux critères de recherche.
           </div>
         ) : (
           <table style={styles.table}>
             <thead>
               <tr style={styles.tableHeadRow}>
-                <th style={{ ...styles.th, width: "70px" }}>ID</th>
-                <th style={styles.th}>Nom / Code</th>
-                <th style={styles.th}>Projet</th>
+                <th style={{ ...styles.th, width: "80px" }}>ID</th>
+                <th style={styles.th}>Nom / Désignation</th>
+                <th style={styles.th}>Projet Lié</th>
                 <th style={styles.th}>Statut</th>
-                <th style={styles.th}>Détails / Assigné</th>
-                <th style={{ ...styles.th, width: "60px", textAlign: "right" }}>Lien</th>
+                <th style={styles.th}>Assigné / Contenu</th>
+                <th style={{ ...styles.th, width: "70px", textAlign: "right" }}>Lien</th>
               </tr>
             </thead>
             <tbody>
@@ -111,31 +111,32 @@ export default function EntityTable({ entity, entityTitle }) {
                 const name = r.name || r.code || r.cached_display_name || `#${r.id}`;
                 const projName = r.project?.name || (typeof r.project === "string" ? r.project : "—");
                 const st = r.sg_status_list || r.sg_status;
+                const isFin = st === "fin" || st === "apr";
                 const assignees = r.task_assignees ? r.task_assignees.map((u) => u.name).join(", ") : null;
                 const noteSnippet = r.content || r.subject;
 
                 return (
                   <tr key={r.id} style={styles.tr}>
-                    <td style={{ ...styles.td, color: "var(--text-sub)", fontSize: "0.8rem" }}>
+                    <td style={styles.idCell}>
                       #{r.id}
                     </td>
-                    <td style={{ ...styles.td, fontWeight: "600", color: "var(--text-main)" }}>
+                    <td style={styles.nameCell}>
                       {name}
                     </td>
-                    <td style={{ ...styles.td, color: "var(--text-muted)" }}>
+                    <td style={styles.projectCell}>
                       {projName}
                     </td>
                     <td style={styles.td}>
                       {st ? (
-                        <span className={`badge ${st === "fin" || st === "apr" ? "badge-fin" : "badge-wtg"}`}>
+                        <span className={`badge ${isFin ? "badge-fin" : "badge-wtg"}`}>
                           {st}
                         </span>
                       ) : (
                         <span style={{ color: "var(--text-sub)", fontSize: "0.75rem" }}>—</span>
                       )}
                     </td>
-                    <td style={{ ...styles.td, color: "var(--text-muted)", fontSize: "0.82rem" }}>
-                      {assignees && <span>Assigné : {assignees}</span>}
+                    <td style={styles.detailCell}>
+                      {assignees && <span style={styles.assigneeBadge}>{assignees}</span>}
                       {noteSnippet && <span style={styles.snippetText}>{noteSnippet}</span>}
                       {!assignees && !noteSnippet && <span>—</span>}
                     </td>
@@ -146,7 +147,7 @@ export default function EntityTable({ entity, entityTitle }) {
                           target="_blank"
                           rel="noreferrer"
                           style={styles.linkIcon}
-                          title="Ouvrir dans ShotGrid"
+                          title="Consulter sur ShotGrid"
                         >
                           <ExternalLink size={14} />
                         </a>
@@ -162,7 +163,8 @@ export default function EntityTable({ entity, entityTitle }) {
         {/* Pagination Footer */}
         <div style={styles.pagination}>
           <span style={styles.pageInfo}>
-            Page {data.page} sur {data.pages || 1}
+            Page <strong style={{ color: "var(--text-main)" }}>{data.page}</strong> sur{" "}
+            <strong style={{ color: "var(--text-main)" }}>{data.pages || 1}</strong>
           </span>
           <div style={styles.pageButtons}>
             <button
@@ -173,7 +175,7 @@ export default function EntityTable({ entity, entityTitle }) {
                 ...(data.page <= 1 ? styles.pageBtnDisabled : {}),
               }}
             >
-              <ChevronLeft size={16} />
+              <ChevronLeft size={15} />
               Précédent
             </button>
             <button
@@ -185,7 +187,7 @@ export default function EntityTable({ entity, entityTitle }) {
               }}
             >
               Suivant
-              <ChevronRight size={16} />
+              <ChevronRight size={15} />
             </button>
           </div>
         </div>
@@ -198,19 +200,20 @@ const styles = {
   container: {
     display: "flex",
     flexDirection: "column",
-    gap: "1.25rem",
+    gap: "1.5rem",
   },
   header: {
     display: "flex",
     alignItems: "flex-end",
     justifyContent: "space-between",
     flexWrap: "wrap",
-    gap: "1rem",
+    gap: "1.25rem",
   },
   title: {
-    fontSize: "1.35rem",
+    fontSize: "1.45rem",
     fontWeight: "700",
     color: "var(--text-main)",
+    letterSpacing: "-0.02em",
   },
   subtitle: {
     fontSize: "0.85rem",
@@ -220,7 +223,7 @@ const styles = {
   controls: {
     display: "flex",
     alignItems: "center",
-    gap: "0.75rem",
+    gap: "0.85rem",
     flexWrap: "wrap",
   },
   searchWrap: {
@@ -230,17 +233,17 @@ const styles = {
   },
   searchIcon: {
     position: "absolute",
-    left: "0.75rem",
+    left: "0.85rem",
   },
   searchInput: {
     backgroundColor: "var(--bg-input)",
     border: "1px solid var(--border)",
     borderRadius: "var(--radius-sm)",
-    padding: "0.45rem 0.75rem 0.45rem 2.2rem",
+    padding: "0.55rem 0.85rem 0.55rem 2.4rem",
     fontSize: "0.85rem",
     color: "var(--text-main)",
     outline: "none",
-    width: "240px",
+    width: "250px",
   },
   filterWrap: {
     display: "flex",
@@ -249,7 +252,7 @@ const styles = {
     backgroundColor: "var(--bg-input)",
     border: "1px solid var(--border)",
     borderRadius: "var(--radius-sm)",
-    padding: "0.45rem 0.75rem",
+    padding: "0.5rem 0.85rem",
   },
   select: {
     background: "transparent",
@@ -264,17 +267,19 @@ const styles = {
     border: "1px solid var(--border)",
     borderRadius: "var(--radius)",
     overflow: "hidden",
+    boxShadow: "var(--shadow-card)",
   },
   loadingContainer: {
-    padding: "4rem",
+    padding: "5rem",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
   },
   emptyContainer: {
-    padding: "3rem",
+    padding: "4rem 2rem",
     textAlign: "center",
     color: "var(--text-muted)",
+    fontSize: "0.9rem",
   },
   table: {
     width: "100%",
@@ -282,24 +287,54 @@ const styles = {
     textAlign: "left",
   },
   tableHeadRow: {
-    backgroundColor: "rgba(0, 0, 0, 0.2)",
+    backgroundColor: "rgba(0, 0, 0, 0.3)",
     borderBottom: "1px solid var(--border)",
   },
   th: {
-    padding: "0.75rem 1rem",
-    fontSize: "0.78rem",
-    fontWeight: "600",
-    color: "var(--text-muted)",
+    padding: "0.85rem 1.25rem",
+    fontSize: "0.72rem",
+    fontWeight: "700",
+    color: "var(--text-sub)",
     textTransform: "uppercase",
-    letterSpacing: "0.04em",
+    letterSpacing: "0.06em",
   },
   tr: {
-    borderBottom: "1px solid rgba(255, 255, 255, 0.04)",
-    transition: "background-color 0.1s",
+    borderBottom: "1px solid rgba(255, 255, 255, 0.03)",
+    transition: "background-color 0.12s ease",
   },
   td: {
-    padding: "0.85rem 1rem",
+    padding: "0.9rem 1.25rem",
     fontSize: "0.88rem",
+    verticalAlign: "middle",
+  },
+  idCell: {
+    padding: "0.9rem 1.25rem",
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: "0.78rem",
+    color: "var(--text-sub)",
+  },
+  nameCell: {
+    padding: "0.9rem 1.25rem",
+    fontWeight: "600",
+    color: "var(--text-main)",
+  },
+  projectCell: {
+    padding: "0.9rem 1.25rem",
+    color: "var(--text-muted)",
+    fontSize: "0.85rem",
+  },
+  detailCell: {
+    padding: "0.9rem 1.25rem",
+    fontSize: "0.82rem",
+    color: "var(--text-muted)",
+    maxWidth: "340px",
+  },
+  assigneeBadge: {
+    color: "var(--text-main)",
+    backgroundColor: "rgba(255, 255, 255, 0.04)",
+    padding: "0.2rem 0.5rem",
+    borderRadius: "4px",
+    border: "1px solid var(--border)",
   },
   snippetText: {
     display: "-webkit-box",
@@ -308,17 +343,19 @@ const styles = {
     overflow: "hidden",
   },
   linkIcon: {
-    color: "var(--text-muted)",
+    color: "var(--text-sub)",
     padding: "4px",
     display: "inline-flex",
+    borderRadius: "4px",
+    transition: "color 0.15s",
   },
   pagination: {
-    padding: "0.75rem 1.25rem",
+    padding: "0.85rem 1.5rem",
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
     borderTop: "1px solid var(--border)",
-    backgroundColor: "rgba(0, 0, 0, 0.15)",
+    backgroundColor: "rgba(0, 0, 0, 0.2)",
   },
   pageInfo: {
     fontSize: "0.8rem",
@@ -326,22 +363,23 @@ const styles = {
   },
   pageButtons: {
     display: "flex",
-    gap: "0.5rem",
+    gap: "0.6rem",
   },
   pageBtn: {
     display: "flex",
     alignItems: "center",
-    gap: "0.3rem",
-    padding: "0.4rem 0.75rem",
+    gap: "0.35rem",
+    padding: "0.45rem 0.85rem",
     borderRadius: "var(--radius-sm)",
     backgroundColor: "var(--bg-input)",
     border: "1px solid var(--border)",
     color: "var(--text-main)",
-    fontSize: "0.8rem",
+    fontSize: "0.82rem",
     fontWeight: "500",
+    transition: "all 0.15s ease",
   },
   pageBtnDisabled: {
-    opacity: 0.4,
+    opacity: 0.35,
     cursor: "not-allowed",
   },
 };

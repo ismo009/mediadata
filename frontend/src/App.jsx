@@ -5,6 +5,7 @@ import ProjectDetail from "./components/ProjectDetail";
 import EntityTable from "./components/EntityTable";
 import ChatAssistant from "./components/ChatAssistant";
 import { fetchDashboard, triggerSync, fetchSyncStatus } from "./api";
+import { Sparkles, Clock } from "lucide-react";
 
 const ENTITY_TITLES = {
   projects: "Projets",
@@ -58,7 +59,6 @@ export default function App() {
     setIsSyncing(true);
     try {
       await triggerSync();
-      // Poll sync status
       const interval = setInterval(async () => {
         try {
           const statusRes = await fetchSyncStatus();
@@ -96,10 +96,10 @@ export default function App() {
       {/* Main Workspace */}
       <main className="main-content">
         <header className="content-header">
-          <div>
-            <h2 style={{ fontSize: "1.1rem", fontWeight: "700" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+            <h2 style={{ fontSize: "1.15rem", fontWeight: "700", letterSpacing: "-0.02em" }}>
               {selectedProjectId
-                ? "Détail du projet"
+                ? "Espace Projet"
                 : activeTab === "overview"
                 ? "Vue d'ensemble de la production"
                 : ENTITY_TITLES[currentEntity] || "Gestion"}
@@ -108,13 +108,27 @@ export default function App() {
 
           <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
             {syncStatus && (
-              <span style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>
-                Dernière synchro :{" "}
-                <strong style={{ color: "var(--text-main)" }}>
-                  {new Date(syncStatus.finished_at || syncStatus.started_at).toLocaleDateString()}{" "}
-                  {new Date(syncStatus.finished_at || syncStatus.started_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </strong>
-              </span>
+              <div style={styles.syncMetaPill}>
+                <Clock size={13} color="var(--text-sub)" />
+                <span style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>
+                  Sync ShotGrid :{" "}
+                  <strong style={{ color: "var(--text-main)", fontWeight: "600" }}>
+                    {new Date(syncStatus.finished_at || syncStatus.started_at).toLocaleDateString([], { month: "short", day: "numeric" })}{" "}
+                    à {new Date(syncStatus.finished_at || syncStatus.started_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </strong>
+                </span>
+              </div>
+            )}
+
+            {!chatOpen && (
+              <button
+                onClick={() => setChatOpen(true)}
+                style={styles.openAssistantBtn}
+                title="Ouvrir l'Assistant IA"
+              >
+                <Sparkles size={14} color="var(--accent)" />
+                <span>Assistant</span>
+              </button>
             )}
           </div>
         </header>
@@ -148,3 +162,28 @@ export default function App() {
     </div>
   );
 }
+
+const styles = {
+  syncMetaPill: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.45rem",
+    backgroundColor: "rgba(255, 255, 255, 0.03)",
+    padding: "0.35rem 0.75rem",
+    borderRadius: "var(--radius-full)",
+    border: "1px solid var(--border)",
+  },
+  openAssistantBtn: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.45rem",
+    padding: "0.45rem 0.85rem",
+    borderRadius: "var(--radius-sm)",
+    backgroundColor: "var(--bg-card)",
+    border: "1px solid var(--border)",
+    color: "var(--text-main)",
+    fontSize: "0.82rem",
+    fontWeight: "600",
+    transition: "all 0.15s ease",
+  },
+};

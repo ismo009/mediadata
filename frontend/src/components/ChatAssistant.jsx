@@ -11,13 +11,14 @@ import {
   ExternalLink,
   Trash2,
   Cpu,
+  CornerDownLeft,
 } from "lucide-react";
 import { streamChatQuery, fetchModels } from "../api";
 
 const QUICK_PROMPTS = [
   "Quels sont les projets actuellement actifs ?",
-  "Y a-t-il des tâches en attente de validation ?",
-  "Résume les dernières notes du projet",
+  "Y a-t-il des tâches bloquées ou en attente ?",
+  "Résume les dernières notes de production",
   "Qui travaille sur les plans d'animation ?",
 ];
 
@@ -58,7 +59,6 @@ export default function ChatAssistant({ isOpen, onClose }) {
     const newHistory = [...messages, { role: "user", content: question }];
     setMessages(newHistory);
 
-    // Placeholder for incoming streaming assistant response
     const assistantIndex = newHistory.length;
     setMessages((prev) => [
       ...prev,
@@ -144,14 +144,14 @@ export default function ChatAssistant({ isOpen, onClose }) {
 
   return (
     <aside style={styles.drawer}>
-      {/* Header */}
+      {/* Drawer Header */}
       <div style={styles.header}>
-        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "0.65rem" }}>
           <div style={styles.botIconBadge}>
             <Sparkles size={16} color="var(--accent)" />
           </div>
           <div>
-            <h3 style={styles.headerTitle}>Assistant Studio Ops</h3>
+            <h3 style={styles.headerTitle}>Assistant IA</h3>
             <div style={styles.modelSelectorWrap}>
               <Cpu size={12} color="var(--text-sub)" />
               <select
@@ -169,14 +169,12 @@ export default function ChatAssistant({ isOpen, onClose }) {
           </div>
         </div>
 
-        <div style={{ display: "flex", gap: "0.35rem" }}>
-          <button onClick={handleClear} style={styles.iconBtn} title="Effacer la discussion">
-            <Trash2 size={16} />
-          </button>
-        </div>
+        <button onClick={handleClear} style={styles.iconBtn} title="Effacer la conversation">
+          <Trash2 size={15} />
+        </button>
       </div>
 
-      {/* Messages */}
+      {/* Messages Scroll Area */}
       <div style={styles.messagesList}>
         {messages.map((msg, idx) => {
           const isUser = msg.role === "user";
@@ -190,7 +188,7 @@ export default function ChatAssistant({ isOpen, onClose }) {
             >
               {!isUser && (
                 <div style={styles.avatarBot}>
-                  <Bot size={15} color="#fff" />
+                  <Bot size={14} color="#fff" />
                 </div>
               )}
 
@@ -200,10 +198,7 @@ export default function ChatAssistant({ isOpen, onClose }) {
                   ...(isUser ? styles.bubbleUser : styles.bubbleBot),
                 }}
               >
-                {/* Sources pill if present */}
-                {msg.sources && (
-                  <SourcesDrawer sources={msg.sources} />
-                )}
+                {msg.sources && <SourcesDrawer sources={msg.sources} />}
 
                 <div className="prose">
                   <Markdown>{msg.content || (msg.isLive ? "…" : "")}</Markdown>
@@ -212,7 +207,7 @@ export default function ChatAssistant({ isOpen, onClose }) {
 
               {isUser && (
                 <div style={styles.avatarUser}>
-                  <User size={15} color="#fff" />
+                  <User size={14} color="#fff" />
                 </div>
               )}
             </div>
@@ -221,10 +216,10 @@ export default function ChatAssistant({ isOpen, onClose }) {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Suggestions if few messages */}
+      {/* Suggestions Pills */}
       {messages.length <= 2 && (
         <div style={styles.quickPromptsWrap}>
-          <p style={styles.quickLabel}>Questions suggérées :</p>
+          <span style={styles.quickLabel}>Suggestions :</span>
           <div style={styles.quickPills}>
             {QUICK_PROMPTS.map((q, i) => (
               <button
@@ -232,14 +227,14 @@ export default function ChatAssistant({ isOpen, onClose }) {
                 onClick={() => handleSend(q)}
                 style={styles.quickPill}
               >
-                {q}
+                <span>{q}</span>
               </button>
             ))}
           </div>
         </div>
       )}
 
-      {/* Input Form */}
+      {/* Input Composer */}
       <div style={styles.inputArea}>
         <form
           onSubmit={(e) => {
@@ -257,7 +252,7 @@ export default function ChatAssistant({ isOpen, onClose }) {
                 handleSend();
               }
             }}
-            placeholder="Posez votre question sur la production..."
+            placeholder="Posez votre question (ex. Tâches de John)..."
             rows={1}
             style={styles.textarea}
           />
@@ -267,9 +262,9 @@ export default function ChatAssistant({ isOpen, onClose }) {
               type="button"
               onClick={handleStop}
               style={styles.stopButton}
-              title="Arrêter la réponse"
+              title="Interrompre la réponse"
             >
-              <Square size={16} />
+              <Square size={14} />
             </button>
           ) : (
             <button
@@ -279,9 +274,9 @@ export default function ChatAssistant({ isOpen, onClose }) {
                 ...styles.sendButton,
                 ...(!input.trim() ? styles.sendDisabled : {}),
               }}
-              title="Envoyer"
+              title="Envoyer (Entrée)"
             >
-              <Send size={16} />
+              <CornerDownLeft size={14} />
             </button>
           )}
         </form>
@@ -300,9 +295,10 @@ function SourcesDrawer({ sources }) {
   return (
     <div style={styles.sourcesBox}>
       <button onClick={() => setOpen(!open)} style={styles.sourcesHeader}>
-        {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+        {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
         <span>
-          Sources inspectées : {sgCount} ShotGrid, {driveCount} Drive
+          {sgCount} source{sgCount > 1 ? "s" : ""} ShotGrid analysée{sgCount > 1 ? "s" : ""}
+          {driveCount > 0 ? `, ${driveCount} Drive` : ""}
         </span>
       </button>
 
@@ -310,10 +306,10 @@ function SourcesDrawer({ sources }) {
         <div style={styles.sourcesList}>
           {sources.shotgrid?.map((s, idx) => (
             <div key={idx} style={styles.sourceItem}>
-              <span className="badge badge-default" style={{ fontSize: "0.68rem" }}>
+              <span className="badge badge-default" style={{ fontSize: "0.65rem", padding: "0.15rem 0.45rem" }}>
                 {s.type}
               </span>
-              <span style={{ fontSize: "0.8rem", color: "var(--text-main)" }}>
+              <span style={{ fontSize: "0.78rem", color: "var(--text-main)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {s.name || `#${s.id}`}
               </span>
               {s.source_url && (
@@ -322,6 +318,7 @@ function SourcesDrawer({ sources }) {
                   target="_blank"
                   rel="noreferrer"
                   style={{ marginLeft: "auto", color: "var(--accent)" }}
+                  title="Voir dans ShotGrid"
                 >
                   <ExternalLink size={12} />
                 </a>
@@ -330,10 +327,10 @@ function SourcesDrawer({ sources }) {
           ))}
           {sources.google_drive?.map((d, idx) => (
             <div key={idx} style={styles.sourceItem}>
-              <span className="badge badge-default" style={{ fontSize: "0.68rem" }}>
+              <span className="badge badge-default" style={{ fontSize: "0.65rem", padding: "0.15rem 0.45rem" }}>
                 Drive
               </span>
-              <span style={{ fontSize: "0.8rem", color: "var(--text-main)" }}>
+              <span style={{ fontSize: "0.78rem", color: "var(--text-main)" }}>
                 {d.name}
               </span>
               {d.webViewLink && (
@@ -356,26 +353,30 @@ function SourcesDrawer({ sources }) {
 
 const styles = {
   drawer: {
-    width: "420px",
+    width: "430px",
     backgroundColor: "var(--bg-sidebar)",
     borderLeft: "1px solid var(--border)",
     display: "flex",
     flexDirection: "column",
     height: "100%",
+    boxShadow: "var(--shadow-lg)",
+    zIndex: 25,
   },
   header: {
-    padding: "1rem 1.25rem",
+    padding: "1.1rem 1.4rem",
     borderBottom: "1px solid var(--border)",
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
-    backgroundColor: "rgba(15, 23, 42, 0.6)",
+    backgroundColor: "rgba(14, 17, 23, 0.9)",
+    backdropFilter: "blur(12px)",
   },
   botIconBadge: {
-    width: "32px",
-    height: "32px",
-    borderRadius: "8px",
-    backgroundColor: "var(--accent-soft)",
+    width: "34px",
+    height: "34px",
+    borderRadius: "10px",
+    background: "linear-gradient(135deg, rgba(99, 102, 241, 0.2) 0%, rgba(56, 189, 248, 0.1) 100%)",
+    border: "1px solid var(--accent-border)",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
@@ -384,12 +385,13 @@ const styles = {
     fontSize: "0.95rem",
     fontWeight: "700",
     color: "var(--text-main)",
+    letterSpacing: "-0.01em",
   },
   modelSelectorWrap: {
     display: "flex",
     alignItems: "center",
     gap: "0.35rem",
-    marginTop: "0.15rem",
+    marginTop: "2px",
   },
   modelSelect: {
     background: "transparent",
@@ -398,42 +400,44 @@ const styles = {
     color: "var(--text-muted)",
     outline: "none",
     cursor: "pointer",
+    fontWeight: "500",
   },
   iconBtn: {
-    color: "var(--text-muted)",
-    padding: "0.4rem",
+    color: "var(--text-sub)",
+    padding: "0.45rem",
     borderRadius: "var(--radius-sm)",
     transition: "color 0.15s",
   },
   messagesList: {
     flex: 1,
     overflowY: "auto",
-    padding: "1.25rem",
+    padding: "1.4rem",
     display: "flex",
     flexDirection: "column",
     gap: "1.25rem",
   },
   messageWrap: {
     display: "flex",
-    gap: "0.6rem",
+    gap: "0.65rem",
     maxWidth: "100%",
   },
   avatarBot: {
     width: "28px",
     height: "28px",
-    borderRadius: "50%",
-    backgroundColor: "#0284c7",
+    borderRadius: "8px",
+    background: "linear-gradient(135deg, #4f46e5 0%, #06b6d4 100%)",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
     flexShrink: 0,
     marginTop: "2px",
+    boxShadow: "0 2px 8px rgba(79, 70, 229, 0.3)",
   },
   avatarUser: {
     width: "28px",
     height: "28px",
-    borderRadius: "50%",
-    backgroundColor: "#475569",
+    borderRadius: "8px",
+    backgroundColor: "#2d3748",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
@@ -441,77 +445,83 @@ const styles = {
     marginTop: "2px",
   },
   bubble: {
-    padding: "0.85rem 1rem",
+    padding: "0.9rem 1.15rem",
     borderRadius: "var(--radius)",
-    maxWidth: "85%",
+    maxWidth: "88%",
     wordBreak: "break-word",
   },
   bubbleUser: {
-    backgroundColor: "var(--accent-soft)",
-    border: "1px solid rgba(56, 189, 248, 0.25)",
+    background: "linear-gradient(135deg, rgba(99, 102, 241, 0.18) 0%, rgba(79, 70, 229, 0.1) 100%)",
+    border: "1px solid var(--accent-border)",
     color: "var(--text-main)",
   },
   bubbleBot: {
     backgroundColor: "var(--bg-card)",
     border: "1px solid var(--border)",
     color: "var(--text-main)",
+    boxShadow: "var(--shadow-card)",
   },
   sourcesBox: {
-    marginBottom: "0.65rem",
-    paddingBottom: "0.5rem",
+    marginBottom: "0.75rem",
+    paddingBottom: "0.6rem",
     borderBottom: "1px solid var(--border)",
   },
   sourcesHeader: {
     display: "flex",
     alignItems: "center",
-    gap: "0.3rem",
-    fontSize: "0.75rem",
+    gap: "0.35rem",
+    fontSize: "0.74rem",
     color: "var(--accent)",
     fontWeight: "600",
   },
   sourcesList: {
-    marginTop: "0.4rem",
-    display: "flex",
-    flexDirection: "column",
-    gap: "0.3rem",
-  },
-  sourceItem: {
-    display: "flex",
-    alignItems: "center",
-    gap: "0.4rem",
-    backgroundColor: "rgba(0, 0, 0, 0.25)",
-    padding: "0.25rem 0.5rem",
-    borderRadius: "4px",
-  },
-  quickPromptsWrap: {
-    padding: "0.75rem 1.25rem",
-    borderTop: "1px solid var(--border)",
-    backgroundColor: "rgba(0, 0, 0, 0.15)",
-  },
-  quickLabel: {
-    fontSize: "0.75rem",
-    color: "var(--text-sub)",
-    marginBottom: "0.4rem",
-  },
-  quickPills: {
+    marginTop: "0.5rem",
     display: "flex",
     flexDirection: "column",
     gap: "0.35rem",
   },
+  sourceItem: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.45rem",
+    backgroundColor: "rgba(0, 0, 0, 0.3)",
+    padding: "0.3rem 0.6rem",
+    borderRadius: "6px",
+    border: "1px solid rgba(255, 255, 255, 0.04)",
+  },
+  quickPromptsWrap: {
+    padding: "0.85rem 1.4rem",
+    borderTop: "1px solid var(--border)",
+    backgroundColor: "rgba(0, 0, 0, 0.15)",
+  },
+  quickLabel: {
+    fontSize: "0.72rem",
+    color: "var(--text-sub)",
+    fontWeight: "600",
+    textTransform: "uppercase",
+    letterSpacing: "0.05em",
+    display: "block",
+    marginBottom: "0.5rem",
+  },
+  quickPills: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "0.4rem",
+  },
   quickPill: {
     textAlign: "left",
-    fontSize: "0.78rem",
-    color: "var(--accent)",
+    fontSize: "0.8rem",
+    color: "var(--text-muted)",
     backgroundColor: "var(--bg-card)",
     border: "1px solid var(--border)",
-    padding: "0.4rem 0.6rem",
+    padding: "0.45rem 0.75rem",
     borderRadius: "var(--radius-sm)",
     transition: "all 0.15s ease",
   },
   inputArea: {
-    padding: "1rem 1.25rem",
+    padding: "1rem 1.4rem 1.4rem",
     borderTop: "1px solid var(--border)",
-    backgroundColor: "var(--bg-card)",
+    backgroundColor: "var(--bg-sidebar)",
   },
   form: {
     display: "flex",
@@ -520,7 +530,8 @@ const styles = {
     backgroundColor: "var(--bg-input)",
     border: "1px solid var(--border)",
     borderRadius: "var(--radius)",
-    padding: "0.4rem 0.6rem",
+    padding: "0.45rem 0.7rem",
+    boxShadow: "0 2px 8px rgba(0, 0, 0, 0.25) inset",
   },
   textarea: {
     flex: 1,
@@ -528,29 +539,32 @@ const styles = {
     background: "transparent",
     color: "var(--text-main)",
     outline: "none",
-    fontSize: "0.88rem",
+    fontSize: "0.86rem",
     resize: "none",
-    maxHeight: "100px",
+    maxHeight: "90px",
+    padding: "0.2rem",
   },
   sendButton: {
     width: "32px",
     height: "32px",
-    borderRadius: "var(--radius-sm)",
-    backgroundColor: "var(--accent)",
-    color: "#0b1120",
+    borderRadius: "8px",
+    background: "linear-gradient(135deg, #4f46e5 0%, #6366f1 100%)",
+    color: "#fff",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
     transition: "all 0.15s ease",
+    boxShadow: "0 2px 8px rgba(99, 102, 241, 0.35)",
   },
   sendDisabled: {
-    opacity: 0.3,
+    opacity: 0.25,
     cursor: "not-allowed",
+    boxShadow: "none",
   },
   stopButton: {
     width: "32px",
     height: "32px",
-    borderRadius: "var(--radius-sm)",
+    borderRadius: "8px",
     backgroundColor: "var(--danger)",
     color: "#fff",
     display: "flex",
@@ -558,4 +572,3 @@ const styles = {
     justifyContent: "center",
   },
 };
-

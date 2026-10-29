@@ -1,5 +1,18 @@
 import React, { useState, useEffect } from "react";
-import { ArrowLeft, ExternalLink, Film, CheckSquare, FileText, Box, Layers, User, Calendar, Loader2 } from "lucide-react";
+import {
+  ArrowLeft,
+  ExternalLink,
+  Film,
+  CheckSquare,
+  FileText,
+  Box,
+  Layers,
+  User,
+  Calendar,
+  Loader2,
+  ChevronRight,
+  Hash,
+} from "lucide-react";
 import { fetchProjectDetails } from "../api";
 
 export default function ProjectDetail({ projectId, onBack }) {
@@ -24,8 +37,10 @@ export default function ProjectDetail({ projectId, onBack }) {
   if (loading) {
     return (
       <div style={styles.centerContainer}>
-        <Loader2 size={32} className="spin" color="var(--accent)" />
-        <p style={{ marginTop: "1rem", color: "var(--text-muted)" }}>Chargement des données du projet...</p>
+        <Loader2 size={36} className="spin" color="var(--accent)" />
+        <p style={{ marginTop: "1rem", color: "var(--text-muted)", fontSize: "0.9rem" }}>
+          Chargement de l'espace projet...
+        </p>
       </div>
     );
   }
@@ -33,9 +48,11 @@ export default function ProjectDetail({ projectId, onBack }) {
   if (error || !data) {
     return (
       <div style={styles.centerContainer}>
-        <p style={{ color: "var(--danger)" }}>Erreur : {error || "Projet introuvable"}</p>
+        <p style={{ color: "var(--danger)", fontWeight: "600" }}>
+          Erreur : {error || "Projet introuvable"}
+        </p>
         <button onClick={onBack} style={styles.backBtn}>
-          <ArrowLeft size={16} /> Retour
+          <ArrowLeft size={16} /> Revenir aux projets
         </button>
       </div>
     );
@@ -54,46 +71,62 @@ export default function ProjectDetail({ projectId, onBack }) {
 
   return (
     <div style={styles.container}>
-      {/* Top Banner */}
-      <div style={styles.header}>
+      {/* Breadcrumb & Navigation */}
+      <div style={styles.breadcrumbBar}>
         <button onClick={onBack} style={styles.backBtn}>
-          <ArrowLeft size={16} />
-          <span>Tous les projets</span>
+          <ArrowLeft size={15} />
+          <span>Projets</span>
         </button>
+        <ChevronRight size={14} color="var(--text-sub)" />
+        <span style={styles.currentBreadcrumb}>{project.name}</span>
+      </div>
 
-        <div style={styles.projectHero}>
-          <div>
-            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "0.35rem" }}>
-              <span className={`badge ${project.sg_status === "Active" ? "badge-active" : "badge-default"}`}>
-                {project.sg_status || "Sans statut"}
-              </span>
-              <span style={{ fontSize: "0.8rem", color: "var(--text-sub)" }}>ID #{project.id}</span>
-            </div>
-            <h1 style={styles.title}>{project.name}</h1>
-            <div style={styles.metaRow}>
-              <div style={styles.metaItem}>
-                <Calendar size={14} color="var(--text-sub)" />
-                <span>{project.start_date || "—"} au {project.end_date || "—"}</span>
-              </div>
+      {/* Project Hero Header */}
+      <div style={styles.heroCard}>
+        <div style={styles.heroInfo}>
+          <div style={styles.heroBadgesRow}>
+            <span
+              className={`badge ${
+                project.sg_status === "Active" || project.sg_status === "act"
+                  ? "badge-active"
+                  : "badge-default"
+              }`}
+            >
+              {project.sg_status || "Sans statut"}
+            </span>
+            <div style={styles.idChip}>
+              <Hash size={12} color="var(--text-sub)" />
+              <span>{project.id}</span>
             </div>
           </div>
 
-          {project.source_url && (
-            <a
-              href={project.source_url}
-              target="_blank"
-              rel="noreferrer"
-              style={styles.shotgridLinkBtn}
-            >
-              <span>Ouvrir dans ShotGrid</span>
-              <ExternalLink size={15} />
-            </a>
-          )}
+          <h1 style={styles.title}>{project.name}</h1>
+
+          <div style={styles.metaRow}>
+            <div style={styles.metaItem}>
+              <Calendar size={14} color="var(--text-sub)" />
+              <span>
+                {project.start_date || "Début indéterminé"} → {project.end_date || "En cours"}
+              </span>
+            </div>
+          </div>
         </div>
+
+        {project.source_url && (
+          <a
+            href={project.source_url}
+            target="_blank"
+            rel="noreferrer"
+            style={styles.shotgridActionBtn}
+          >
+            <span>Ouvrir dans ShotGrid</span>
+            <ExternalLink size={15} />
+          </a>
+        )}
       </div>
 
-      {/* Tabs */}
-      <div style={styles.tabNav}>
+      {/* Modern Tabs Navigation */}
+      <div style={styles.tabsContainer}>
         {tabs.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
@@ -106,69 +139,82 @@ export default function ProjectDetail({ projectId, onBack }) {
                 ...(isActive ? styles.tabBtnActive : {}),
               }}
             >
-              <Icon size={16} />
+              <Icon size={16} color={isActive ? "var(--accent)" : "var(--text-sub)"} />
               <span>{tab.label}</span>
-              <span style={styles.tabCount}>{tab.count}</span>
+              <span
+                style={{
+                  ...styles.tabCount,
+                  ...(isActive ? styles.tabCountActive : {}),
+                }}
+              >
+                {tab.count}
+              </span>
             </button>
           );
         })}
       </div>
 
-      {/* Records List */}
-      <div style={styles.recordsContainer}>
+      {/* Records Grid */}
+      <div style={styles.recordsSection}>
         {currentRecords.length === 0 ? (
-          <div style={styles.emptyNotice}>
-            Aucun enregistrement de type {activeTab} pour ce projet.
+          <div style={styles.emptyContainer}>
+            <p style={styles.emptyText}>
+              Aucun élément de type <strong>{activeTab}</strong> rattaché à ce projet.
+            </p>
           </div>
         ) : (
-          <div style={styles.recordsList}>
+          <div style={styles.recordsGrid}>
             {currentRecords.map((r) => {
               const name = r.name || r.code || r.cached_display_name || `#${r.id}`;
               const status = r.sg_status_list || r.sg_status;
+              const isFin = status === "fin" || status === "apr";
               return (
                 <div key={r.id} style={styles.recordCard}>
                   <div style={styles.recordHeader}>
-                    <div style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
-                      <span style={styles.recordName}>{name}</span>
+                    <span style={styles.recordTitle}>{name}</span>
+                    <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
                       {status && (
-                        <span className={`badge ${status === "fin" || status === "apr" ? "badge-fin" : "badge-wtg"}`}>
+                        <span className={`badge ${isFin ? "badge-fin" : "badge-wtg"}`}>
                           {status}
                         </span>
                       )}
+                      {r.source_url && (
+                        <a
+                          href={r.source_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={styles.recordLink}
+                          title="Voir dans ShotGrid"
+                        >
+                          <ExternalLink size={13} />
+                        </a>
+                      )}
                     </div>
-                    {r.source_url && (
-                      <a
-                        href={r.source_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        style={styles.recordLink}
-                        title="Voir dans ShotGrid"
-                      >
-                        <ExternalLink size={13} />
-                      </a>
-                    )}
                   </div>
 
-                  {/* Specific content depending on type */}
                   {activeTab === "Note" && (r.content || r.subject) && (
                     <div style={styles.noteContent}>
-                      {r.subject && <strong style={{ display: "block", marginBottom: "0.25rem" }}>{r.subject}</strong>}
-                      <p>{r.content}</p>
+                      {r.subject && (
+                        <strong style={styles.noteSubject}>{r.subject}</strong>
+                      )}
+                      <p style={styles.noteBody}>{r.content}</p>
                     </div>
                   )}
 
                   {activeTab === "Task" && (
                     <div style={styles.taskMeta}>
                       {r.task_assignees && r.task_assignees.length > 0 && (
-                        <div style={styles.metaBadge}>
-                          <User size={12} />
+                        <div style={styles.metaChip}>
+                          <User size={12} color="var(--text-sub)" />
                           <span>{r.task_assignees.map((u) => u.name).join(", ")}</span>
                         </div>
                       )}
                       {r.start_date && (
-                        <div style={styles.metaBadge}>
-                          <Calendar size={12} />
-                          <span>{r.start_date} → {r.due_date || r.end_date || "—"}</span>
+                        <div style={styles.metaChip}>
+                          <Calendar size={12} color="var(--text-sub)" />
+                          <span>
+                            {r.start_date} → {r.due_date || r.end_date || "—"}
+                          </span>
                         </div>
                       )}
                     </div>
@@ -187,80 +233,108 @@ const styles = {
   container: {
     display: "flex",
     flexDirection: "column",
-    gap: "1.5rem",
+    gap: "1.75rem",
   },
   centerContainer: {
-    padding: "5rem 0",
+    padding: "6rem 0",
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
     justifyContent: "center",
   },
-  header: {
+  breadcrumbBar: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.6rem",
+    fontSize: "0.85rem",
+  },
+  backBtn: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.35rem",
+    color: "var(--text-muted)",
+    fontWeight: "500",
+    transition: "color 0.15s",
+  },
+  currentBreadcrumb: {
+    color: "var(--text-main)",
+    fontWeight: "600",
+  },
+  heroCard: {
     backgroundColor: "var(--bg-card)",
     border: "1px solid var(--border)",
     borderRadius: "var(--radius)",
-    padding: "1.5rem",
-  },
-  backBtn: {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: "0.4rem",
-    color: "var(--text-muted)",
-    fontSize: "0.85rem",
-    fontWeight: "500",
-    marginBottom: "1rem",
-    transition: "color 0.15s",
-  },
-  projectHero: {
+    padding: "1.85rem",
     display: "flex",
     alignItems: "flex-start",
     justifyContent: "space-between",
     flexWrap: "wrap",
-    gap: "1rem",
+    gap: "1.5rem",
+    boxShadow: "var(--shadow-card)",
+  },
+  heroInfo: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "0.5rem",
+  },
+  heroBadgesRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.6rem",
+  },
+  idChip: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.25rem",
+    fontSize: "0.75rem",
+    color: "var(--text-sub)",
+    fontFamily: "'JetBrains Mono', monospace",
   },
   title: {
-    fontSize: "1.5rem",
-    fontWeight: "700",
+    fontSize: "1.75rem",
+    fontWeight: "800",
     color: "var(--text-main)",
+    letterSpacing: "-0.03em",
   },
   metaRow: {
     display: "flex",
-    gap: "1.25rem",
-    marginTop: "0.4rem",
+    gap: "1.5rem",
+    marginTop: "0.25rem",
   },
   metaItem: {
     display: "flex",
     alignItems: "center",
-    gap: "0.35rem",
+    gap: "0.4rem",
     fontSize: "0.82rem",
     color: "var(--text-muted)",
   },
-  shotgridLinkBtn: {
+  shotgridActionBtn: {
     display: "flex",
     alignItems: "center",
-    gap: "0.5rem",
-    padding: "0.55rem 0.9rem",
+    gap: "0.55rem",
+    padding: "0.65rem 1.1rem",
     backgroundColor: "var(--accent-soft)",
-    border: "1px solid rgba(56, 189, 248, 0.3)",
+    border: "1px solid var(--accent-border)",
     borderRadius: "var(--radius-sm)",
     color: "var(--accent)",
     fontWeight: "600",
     fontSize: "0.85rem",
     textDecoration: "none",
+    boxShadow: "0 2px 10px rgba(99, 102, 241, 0.15)",
+    transition: "all 0.15s ease",
   },
-  tabNav: {
+  tabsContainer: {
     display: "flex",
-    gap: "0.5rem",
+    gap: "0.4rem",
     borderBottom: "1px solid var(--border)",
-    paddingBottom: "0.5rem",
+    paddingBottom: "0.4rem",
     overflowX: "auto",
   },
   tabBtn: {
     display: "flex",
     alignItems: "center",
-    gap: "0.5rem",
-    padding: "0.55rem 0.9rem",
+    gap: "0.55rem",
+    padding: "0.6rem 1rem",
     borderRadius: "var(--radius-sm)",
     color: "var(--text-muted)",
     fontSize: "0.88rem",
@@ -269,79 +343,103 @@ const styles = {
   },
   tabBtnActive: {
     backgroundColor: "var(--bg-card)",
-    color: "var(--accent)",
+    color: "#fff",
     fontWeight: "600",
     border: "1px solid var(--border)",
+    boxShadow: "var(--shadow-sm)",
   },
   tabCount: {
-    fontSize: "0.75rem",
-    backgroundColor: "rgba(255, 255, 255, 0.08)",
-    padding: "0.1rem 0.4rem",
-    borderRadius: "999px",
-  },
-  recordsContainer: {
-    minHeight: "300px",
-  },
-  emptyNotice: {
-    padding: "3rem",
-    textAlign: "center",
+    fontSize: "0.72rem",
+    backgroundColor: "rgba(255, 255, 255, 0.05)",
+    padding: "0.1rem 0.45rem",
+    borderRadius: "var(--radius-full)",
     color: "var(--text-sub)",
-    fontSize: "0.9rem",
-    backgroundColor: "rgba(0, 0, 0, 0.1)",
+    fontWeight: "600",
+  },
+  tabCountActive: {
+    backgroundColor: "var(--accent-soft)",
+    color: "var(--accent)",
+  },
+  recordsSection: {
+    minHeight: "350px",
+  },
+  emptyContainer: {
+    padding: "4rem 2rem",
+    textAlign: "center",
+    backgroundColor: "var(--bg-card)",
     borderRadius: "var(--radius)",
     border: "1px dashed var(--border)",
   },
-  recordsList: {
+  emptyText: {
+    fontSize: "0.9rem",
+    color: "var(--text-muted)",
+  },
+  recordsGrid: {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))",
-    gap: "0.85rem",
+    gap: "1rem",
   },
   recordCard: {
     backgroundColor: "var(--bg-card)",
     border: "1px solid var(--border)",
-    borderRadius: "var(--radius-sm)",
-    padding: "0.9rem 1rem",
+    borderRadius: "var(--radius)",
+    padding: "1rem 1.15rem",
     display: "flex",
     flexDirection: "column",
-    gap: "0.5rem",
+    gap: "0.75rem",
+    boxShadow: "var(--shadow-card)",
   },
   recordHeader: {
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
+    gap: "0.75rem",
   },
-  recordName: {
+  recordTitle: {
     fontWeight: "600",
-    fontSize: "0.92rem",
+    fontSize: "0.95rem",
     color: "var(--text-main)",
   },
   recordLink: {
-    color: "var(--text-muted)",
-    padding: "2px",
+    color: "var(--text-sub)",
+    padding: "3px",
+    display: "flex",
+    alignItems: "center",
+    transition: "color 0.15s",
   },
   noteContent: {
     fontSize: "0.82rem",
+    backgroundColor: "rgba(0, 0, 0, 0.3)",
+    padding: "0.75rem",
+    borderRadius: "var(--radius-sm)",
+    lineHeight: "1.5",
+    border: "1px solid rgba(255, 255, 255, 0.04)",
+  },
+  noteSubject: {
+    display: "block",
+    color: "var(--text-main)",
+    marginBottom: "0.3rem",
+    fontWeight: "600",
+  },
+  noteBody: {
     color: "var(--text-muted)",
-    backgroundColor: "rgba(0, 0, 0, 0.2)",
-    padding: "0.6rem",
-    borderRadius: "4px",
-    lineHeight: "1.4",
+    whiteSpace: "pre-wrap",
   },
   taskMeta: {
     display: "flex",
     alignItems: "center",
     flexWrap: "wrap",
     gap: "0.5rem",
-    marginTop: "0.2rem",
   },
-  metaBadge: {
+  metaChip: {
     display: "flex",
     alignItems: "center",
-    gap: "0.3rem",
+    gap: "0.35rem",
     fontSize: "0.75rem",
-    color: "var(--text-sub)",
-    backgroundColor: "rgba(255, 255, 255, 0.04)",
-    padding: "0.2rem 0.45rem",
-    borderRadius: "4px",
+    color: "var(--text-muted)",
+    backgroundColor: "rgba(255, 255, 255, 0.03)",
+    padding: "0.25rem 0.55rem",
+    borderRadius: "6px",
+    border: "1px solid var(--border)",
   },
 };
