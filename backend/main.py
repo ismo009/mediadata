@@ -32,9 +32,17 @@ SYNC_ENTITIES = {
 }
 
 
+class ChatMessage(BaseModel):
+    role: str = "user"
+    content: str = ""
+
+    class Config:
+        extra = "ignore"
+
+
 class QueryRequest(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
-    history: list[dict[str, str]] = Field(default_factory=list, max_length=20)
+    history: list[dict[str, Any]] = Field(default_factory=list, max_length=30)
     model: Optional[str] = None
 
 

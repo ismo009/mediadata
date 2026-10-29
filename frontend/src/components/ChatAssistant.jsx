@@ -67,10 +67,18 @@ export default function ChatAssistant({ isOpen, onClose }) {
 
     setIsStreaming(true);
 
+    const cleanHistory = newHistory
+      .filter((m) => m.content && m.content.trim())
+      .map((m) => ({
+        role: m.role,
+        content: m.content,
+      }))
+      .slice(-10);
+
     const controller = streamChatQuery({
       question,
-      history: newHistory.slice(-10),
-      model: selectedModel,
+      history: cleanHistory,
+      model: selectedModel || undefined,
       onSources: (sources) => {
         setMessages((prev) => {
           const next = [...prev];
@@ -550,3 +558,4 @@ const styles = {
     justifyContent: "center",
   },
 };
+
