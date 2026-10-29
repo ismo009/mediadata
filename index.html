@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Production dashboard</title>
+<style>
+:root{
+  --bg:#f5f7fb; --panel:#ffffff; --ink:#18202a; --muted:#687386;
+  --line:#e4e9f0; --accent:#2563eb; --accent-ink:#ffffff;
+  --user:#e8f0ff; --err:#c2413b; --shadow:0 12px 30px rgba(28,44,74,.07);
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#111827; --panel:#182131; --ink:#edf2f7; --muted:#9aa8bb;
+    --line:#2a3749; --accent:#69a0ff; --accent-ink:#0e1726;
+    --user:#203452; --err:#ff8b82; --shadow:0 12px 30px rgba(0,0,0,.2);
+  }
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{
+  font:14px/1.5 Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  background:var(--bg); color:var(--ink);
+  display:flex; flex-direction:column;
+}
+header{
+  display:flex; gap:.65rem; align-items:center; flex-wrap:wrap;
+  min-height:64px;padding:.7rem 1.25rem;background:var(--panel);
+  border-bottom:1px solid var(--line);box-shadow:0 2px 12px rgba(28,44,74,.04);z-index:2;
+}
+header h1{font-size:1rem;margin:0;font-weight:750;letter-spacing:-.02em;margin-right:auto}
+select,input,button,textarea{font:inherit;color:inherit}
+select,input[type=text]{
+  background:var(--bg); border:1px solid var(--line); border-radius:6px;
+  padding:.35rem .5rem; max-width:100%;
+}
+button{
+  border:1px solid var(--line); background:var(--panel); border-radius:7px;
+  padding:.48rem .8rem; cursor:pointer;transition:background .15s,border-color .15s,transform .15s;
+}
+button:hover{border-color:var(--accent)}
+button:active{transform:translateY(1px)}
+button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:650}
+button:disabled{opacity:.5;cursor:default}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+#status{font-size:.78rem;color:var(--muted);padding:.3rem .6rem;border:1px solid var(--line);border-radius:999px}
+#status.ok::before{content:"● ";color:#22a06b}
+#status.ko::before{content:"● ";color:var(--err)}
+#settings{
+  display:none; gap:.5rem; align-items:center; flex-wrap:wrap;
+  padding:.6rem 1rem; background:var(--panel); border-bottom:1px solid var(--line);
+}
+#settings.open{display:flex}
+#settings input{flex:1;min-width:220px}
+.app-shell{display:grid;grid-template-columns:210px minmax(0,1fr) minmax(340px,410px);flex:1;min-height:0}
+.sidebar{padding:1.35rem .85rem;background:var(--panel);border-right:1px solid var(--line)}
+.brand{font-size:.76rem;font-weight:800;letter-spacing:.14em;color:var(--muted);margin:.35rem .7rem 1.75rem}
+.nav{display:grid;gap:.3rem}
+.nav button{text-align:left;border:0;background:transparent;color:var(--muted);font-weight:550;padding:.65rem .75rem}
+.nav button.active,.nav button:hover{background:var(--user);color:var(--accent);border-color:transparent}
+.dashboard{overflow-y:auto;padding:2rem clamp(1rem,3vw,2.5rem)}
+.dashboard h2{margin:.1rem 0 .25rem;font-size:1.8rem;letter-spacing:-.035em}
+.subtitle{color:var(--muted);margin-top:0}
+.cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.75rem;margin:1.25rem 0}
+.project-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:.75rem}
+.project-card{background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:1rem;text-align:left;cursor:pointer;box-shadow:0 2px 5px rgba(28,44,74,.025);transition:transform .15s,box-shadow .15s,border-color .15s}
+.project-card:hover,.project-card.selected{border-color:var(--accent);box-shadow:var(--shadow);transform:translateY(-2px)}
+.project-card h4{margin:0 0 .55rem;font-size:.95rem;letter-spacing:-.01em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.project-card p{margin:.25rem 0;color:var(--muted);font-size:.88rem}
+.project-status{color:var(--accent)!important;font-weight:600}
+.detail-section{border-top:1px solid var(--line);padding:.75rem 0}
+.detail-section summary{cursor:pointer;font-weight:600}
+.record-list{display:grid;gap:.5rem;margin-top:.65rem}
+.record{border:1px solid var(--line);border-radius:7px;padding:.65rem;background:var(--bg)}
+.record summary{font-weight:500}
+.record pre{white-space:pre-wrap;word-break:break-word;overflow:auto;margin:.6rem 0 0;font:12px/1.45 ui-monospace,Menlo,monospace}
+.source-link{display:inline-block;margin-top:.45rem;color:var(--accent);font-size:.86rem}
+.card,.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:1.1rem;box-shadow:var(--shadow)}
+.card strong{display:block;font-size:1.7rem;margin-top:.25rem}
+.card small{color:var(--muted)}
+.panel h3{margin:.1rem 0 .75rem}
+.activity{display:grid;gap:.7rem}
+.activity div{display:flex;justify-content:space-between;border-bottom:1px solid var(--line);padding-bottom:.55rem}
+.activity span{color:var(--muted)}
+.assistant{display:flex;flex-direction:column;min-height:0;background:var(--panel);border-left:1px solid var(--line)}
+.assistant-header{padding:1.35rem 1.25rem;border-bottom:1px solid var(--line);background:linear-gradient(135deg,var(--panel),var(--user))}
+.assistant-header h2{font-size:1.05rem;margin:0;letter-spacing:-.02em}
+.assistant-header p{margin:.2rem 0 0;color:var(--muted);font-size:.88rem}
+main{flex:1;overflow-y:auto;padding:1.25rem}
+.wrap{max-width:46rem;margin:0 auto;display:flex;flex-direction:column;gap:1rem}
+.msg{padding:.75rem .9rem;border-radius:11px;white-space:pre-wrap;word-wrap:break-word;max-width:92%;box-shadow:0 2px 5px rgba(28,44,74,.04)}
+.msg.user{align-self:flex-end;background:var(--user)}
+.msg.bot{align-self:flex-start;background:var(--panel);border:1px solid var(--line)}
+.msg.err{color:var(--err);border-color:var(--err)}
+.msg code,.msg pre{font-family:ui-monospace,Menlo,monospace;font-size:.88em}
+.msg pre{background:var(--bg);padding:.6rem;border-radius:6px;overflow-x:auto;margin:.4rem 0;white-space:pre}
+.empty{color:var(--muted);text-align:center;margin-top:20vh}
+form{
+  display:flex;gap:.5rem;padding:.75rem 1rem;
+  background:var(--panel); border-top:1px solid var(--line);
+  padding-bottom:calc(.75rem + env(safe-area-inset-bottom,0px));
+}
+form .wrap{flex-direction:row;width:100%;align-items:flex-end}
+textarea{
+  flex:1;resize:none;max-height:10rem;background:var(--bg);
+  border:1px solid var(--line);border-radius:9px;padding:.65rem .75rem;
+}
+@media(max-width:1100px){
+  header{padding:.65rem .9rem}
+  header h1{width:100%;margin-right:0}
+  .app-shell{grid-template-columns:minmax(0,1fr) minmax(300px,38vw)}
+  .sidebar{display:none}
+  .dashboard{padding:1.35rem}
+}
+@media(max-width:700px){
+  header{gap:.45rem}
+  header select{max-width:145px}
+  header button{padding:.42rem .6rem}
+  .app-shell{display:block;overflow:auto}
+  .dashboard{min-height:0;padding:1rem}
+  .assistant{border-left:0;border-top:1px solid var(--line);min-height:430px}
+  .assistant main{min-height:260px}
+}
+@media(max-width:520px){
+  header{align-items:stretch}
+  header h1{flex-basis:100%}
+  header select{flex:1}
+  header #sync{flex:1}
+  header #gear,header #clear{flex:0 0 auto}
+  .cards{grid-template-columns:1fr}
+  .dashboard{padding:.8rem}
+  .project-grid{grid-template-columns:1fr}
+  .assistant{min-height:390px}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Dashboard production</h1>
+  <span id="status">hors ligne</span>
+  <select id="model" aria-label="Modèle Ollama"></select>
+  <button id="sync" type="button" class="primary">Synchroniser ShotGrid</button>
+  <button id="gear" type="button" aria-expanded="false">Réglages</button>
+  <button id="clear" type="button">Effacer</button>
+</header>
+
+<div id="settings">
+  <label for="url">Adresse d'Ollama</label>
+  <input type="text" id="url" placeholder="http://192.168.1.20:11434">
+  <button id="save" type="button" class="primary">Enregistrer</button>
+  <span id="api-note">La recherche Drive/ShotGrid passe par le serveur local.</span>
+</div>
+
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="brand">STUDIO OPS</div>
+    <nav class="nav" aria-label="Navigation">
+      <button class="active" type="button" data-entity="projects">Vue d'ensemble</button>
+      <button type="button" data-entity="projects">Projets</button>
+      <button type="button" data-entity="shots">Shots</button>
+      <button type="button" data-entity="tasks">Tasks</button>
+      <button type="button" data-entity="assets">Assets</button>
+      <button type="button" data-entity="versions">Versions</button>
+      <button type="button" data-entity="notes">Notes</button>
+    </nav>
+  </aside>
+  <section class="dashboard">
+    <h2>Vue d'ensemble</h2>
+    <p class="subtitle">Un aperçu de votre production et de vos ressources.</p>
+    <div class="cards">
+      <div class="card"><small>Projets actifs</small><strong id="active-projects">—</strong></div>
+      <div class="card"><small>Projets ShotGrid</small><strong id="total-projects">—</strong></div>
+      <div class="card"><small>Documents Drive</small><strong id="drive-documents">—</strong></div>
+    </div>
+    <div class="panel">
+      <h3>Projets</h3>
+      <p id="sync-status" class="subtitle">Synchronisation : vérification…</p>
+      <div class="project-grid" id="project-grid"><div><span>Chargement des projets…</span></div></div>
+    </div>
+    <div class="panel" id="project-detail-panel" hidden>
+      <h3 id="project-detail-title">Projet</h3>
+      <p class="subtitle" id="project-detail-meta"></p>
+      <div class="activity" id="project-detail"></div>
+    </div>
+  </section>
+  <aside class="assistant">
+    <div class="assistant-header">
+      <h2>Assistant IA</h2>
+      <p>Pose une question sur ShotGrid ou Google Drive.</p>
+    </div>
+    <main id="log">
+      <div class="wrap" id="chat"><p class="empty" id="empty">Comment puis-je vous aider ?</p></div>
+    </main>
+    <form id="form">
+      <div class="wrap">
+        <textarea id="input" rows="1" placeholder="Ex. Quels sont les projets actifs ?" autofocus></textarea>
+        <button id="send" class="primary" type="submit">Envoyer</button>
+        <button id="stop" type="button" hidden>Arrêter</button>
+      </div>
+    </form>
+  </aside>
+</div>
+
+<script>
+// Par défaut : Ollama sur la machine qui ouvre la page. Change-le dans « Réglages »
+// pour mettre l'IP de ton Mac, par exemple http://192.168.1.20:11434
+const DEFAULT_URL = location.hostname && location.hostname !== "localhost"
+  ? `http://${location.hostname}:11434`
+  : "http://localhost:11434";
+
+const $ = id => document.getElementById(id);
+const chat = $("chat"), log = $("log"), input = $("input");
+let history = [];
+let controller = null;
+
+function store(k, v){ try{ if(v===undefined) return localStorage.getItem(k); localStorage.setItem(k,v);}catch(e){return null} }
+let baseUrl = (store("ollama_url") || DEFAULT_URL).replace(/\/+$/,"");
+$("url").value = baseUrl;
+
+function setStatus(text, ok){
+  const s = $("status"); s.textContent = text;
+  s.className = ok ? "ok" : "ko";
+}
+
+async function loadModels(){
+  const sel = $("model");
+  try{
+    const r = await fetch(baseUrl + "/api/tags");
+    if(!r.ok) throw new Error("HTTP " + r.status);
+    const data = await r.json();
+    const names = (data.models || []).map(m => m.name);
+    sel.innerHTML = "";
+    names.forEach(n => sel.add(new Option(n, n)));
+    const saved = store("ollama_model");
+    if(saved && names.includes(saved)) sel.value = saved;
+    setStatus(names.length ? "connecté" : "aucun modèle installé", names.length > 0);
+  }catch(e){
+    sel.innerHTML = "";
+    setStatus("injoignable", false);
+    addMessage("bot", "Impossible de joindre Ollama à " + baseUrl +
+      ".\nVérifie l'adresse dans « Réglages » et que le Mac autorise les connexions (OLLAMA_HOST et OLLAMA_ORIGINS).", true);
+  }
+}
+
+function addMessage(role, text, isErr){
+  $("empty")?.remove();
+  const d = document.createElement("div");
+  d.className = "msg " + role + (isErr ? " err" : "");
+  setText(d, text);
+  chat.appendChild(d);
+  log.scrollTop = log.scrollHeight;
+  return d;
+}
+
+// Affiche le texte en échappant le HTML, avec blocs ``` et `code` simples
+function setText(el, text){
+  const esc = s => s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  let html = esc(text).replace(/```(?:\w+)?\n?([\s\S]*?)(```|$)/g, (_,c)=>"<pre>"+c+"</pre>");
+  html = html.replace(/`([^`\n]+)`/g,"<code>$1</code>");
+  el.innerHTML = html;
+}
+
+async function send(text){
+  if(location.port === "8000" || location.hostname === "localhost"){
+    await sendDashboardQuery(text);
+    return;
+  }
+  const model = $("model").value;
+  if(!model){ addMessage("bot","Aucun modèle sélectionné.",true); return; }
+  history.push({role:"user", content:text});
+  addMessage("user", text);
+  const bubble = addMessage("bot", "…");
+  let full = "";
+  controller = new AbortController();
+  toggleBusy(true);
+  try{
+    const r = await fetch(baseUrl + "/api/chat", {
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({model, messages:history, stream:true}),
+      signal: controller.signal
+    });
+    if(!r.ok) throw new Error("HTTP " + r.status + " " + await r.text());
+    const reader = r.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    while(true){
+      const {done, value} = await reader.read();
+      if(done) break;
+      buf += dec.decode(value, {stream:true});
+      const lines = buf.split("\n");
+      buf = lines.pop();
+      for(const line of lines){
+        if(!line.trim()) continue;
+        const j = JSON.parse(line);
+        if(j.error) throw new Error(j.error);
+        if(j.message?.content){
+          full += j.message.content;
+          setText(bubble, full);
+          log.scrollTop = log.scrollHeight;
+        }
+
+      }
+    }
+    history.push({role:"assistant", content:full});
+  }catch(e){
+    if(e.name === "AbortError"){
+      if(full) history.push({role:"assistant", content:full});
+      else { history.pop(); bubble.remove(); }
+    }else{
+      history.pop();
+      bubble.classList.add("err");
+      setText(bubble, "Erreur : " + e.message);
+    }
+  }finally{
+    controller = null;
+    toggleBusy(false);
+    input.focus();
+  }
+}
+
+async function sendDashboardQuery(text){
+  history.push({role:"user", content:text});
+  addMessage("user", text);
+  const bubble = addMessage("bot", "Recherche dans ShotGrid et Google Drive…");
+  toggleBusy(true);
+  try{
+    const r = await fetch("/api/query", {
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({question:text, history:history.slice(-10)})
+    });
+    const data = await r.json();
+    if(!r.ok) throw new Error(data.detail || "Erreur serveur");
+    setText(bubble, data.answer);
+    history.push({role:"assistant", content:data.answer});
+    bubble.textContent += `\n\nSources : ${data.sources.shotgrid.length} ShotGrid, ${data.sources.google_drive.length} Google Drive`;
+  }catch(e){
+    bubble.classList.add("err");
+    setText(bubble, "Erreur : " + e.message);
+  }finally{
+    toggleBusy(false);
+    input.focus();
+  }
+}
+
+async function loadDashboard(){
+  try{
+    const r = await fetch("/api/dashboard");
+    if(!r.ok) throw new Error("HTTP " + r.status);
+    const data = await r.json();
+    $("active-projects").textContent = data.projects_active;
+    $("total-projects").textContent = data.projects_total;
+    $("drive-documents").textContent = "—";
+    const sync = data.last_sync;
+    $("sync-status").textContent = sync
+      ? `Dernière synchronisation : ${sync.status} — ${sync.records_count} enregistrements — ${new Date(sync.finished_at || sync.started_at).toLocaleString()}`
+      : "Aucune synchronisation effectuée.";
+    renderProjects(data.projects || []);
+  }catch(e){
+    $("project-grid").innerHTML = `<div><span>Impossible de charger ShotGrid : ${e.message}</span></div>`;
+  }
+
+}
+
+function renderProjects(projects){
+  const grid = $("project-grid");
+  grid.innerHTML = projects.length
+    ? projects.map(project => `
+      <button class="project-card" type="button" data-project-id="${project.id}">
+        <h4>${project.name || "Projet sans nom"}</h4>
+        <p class="${project.sg_status === "Active" ? "project-status" : ""}">${project.sg_status || "Sans statut"}</p>
+        <p>${project.start_date || "Date de début non définie"}</p>
+      </button>
+    `).join("")
+    : "<div><span>Aucun projet trouvé</span></div>";
+  grid.querySelectorAll("[data-project-id]").forEach(card =>
+    card.addEventListener("click", () => loadProject(card.dataset.projectId, card))
+  );
+}
+
+async function loadProject(projectId, card){
+  try{
+    const r = await fetch(`/api/projects/${projectId}`);
+    const data = await r.json();
+    if(!r.ok) throw new Error(data.detail || "Projet introuvable");
+    document.querySelectorAll(".project-card").forEach(item => item.classList.remove("selected"));
+    card.classList.add("selected");
+    const project = data.project;
+    const related = data.related;
+    $("project-detail-panel").hidden = false;
+    $("project-detail-title").textContent = project.name || `Projet #${project.id}`;
+    $("project-detail-meta").innerHTML =
+      `${project.sg_status || "Sans statut"} · début ${project.start_date || "non défini"} · fin ${project.end_date || "non définie"}`;
+    if(project.source_url){
+      $("project-detail-meta").innerHTML += ` · <a class="source-link" href="${project.source_url}" target="_blank" rel="noopener noreferrer">Ouvrir dans ShotGrid ↗</a>`;
+    }
+    $("project-detail").innerHTML = Object.entries(related).map(([type, records]) => `
+      <details class="detail-section" open>
+        <summary>${type} · ${records.length} enregistrement${records.length > 1 ? "s" : ""}</summary>
+        <div class="record-list">
+          ${records.length ? records.map(record => `
+            <details class="record">
+              <summary>${record.name || record.code || `${record.type} #${record.id}`}</summary>
+              ${record.source_url ? `<a class="source-link" href="${record.source_url}" target="_blank" rel="noopener noreferrer">Ouvrir dans ShotGrid ↗</a>` : ""}
+              <pre>${escapeHtml(JSON.stringify(record, null, 2))}</pre>
+            </details>
+          `).join("") : "<span>Aucun enregistrement lié.</span>"}
+        </div>
+      </details>
+    `).join("");
+    $("project-detail-panel").scrollIntoView({behavior:"smooth", block:"nearest"});
+  }catch(e){
+    addMessage("bot", "Impossible de charger le projet : " + e.message, true);
+  }
+
+  function escapeHtml(value){
+    return value.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  }
+}
+
+async function loadEntity(entity){
+  try{
+    if(entity === "projects"){
+      await loadDashboard();
+      return;
+    }
+    const r = await fetch(`/api/data/${entity}?limit=50`);
+    const data = await r.json();
+    if(!r.ok) throw new Error(data.detail || "Erreur de chargement");
+    $("project-grid").innerHTML = data.records.length
+      ? data.records.map(record =>
+        `<button class="project-card" type="button"><h4>${record.name || record.code || `${record.type} #${record.id}`}</h4><p>${record.type}</p></button>`
+      ).join("")
+      : "<div><span>Aucune donnée en cache. Lance une synchronisation.</span></div>";
+  }catch(e){
+    $("project-grid").innerHTML = `<div><span>Impossible de charger les données : ${e.message}</span></div>`;
+  }
+}
+
+async function syncShotGrid(){
+  const button = $("sync");
+  button.disabled = true;
+  button.textContent = "Synchronisation…";
+  $("sync-status").textContent = "Synchronisation ShotGrid en cours…";
+  try{
+    const r = await fetch("/api/sync", {method:"POST"});
+    const data = await r.json();
+    if(!r.ok) throw new Error(data.detail || "Erreur de synchronisation");
+    await watchSync();
+  }catch(e){
+    $("sync-status").textContent = "Synchronisation échouée.";
+    addMessage("bot", "Synchronisation impossible : " + e.message, true);
+  }finally{
+    button.disabled = false;
+    button.textContent = "Synchroniser ShotGrid";
+  }
+}
+
+async function watchSync(){
+  const started = Date.now();
+  while(Date.now() - started < 900000){
+    const r = await fetch("/api/sync/status");
+    const data = await r.json();
+    const sync = data.last_sync;
+    if(sync?.status === "completed"){
+      await loadDashboard();
+      addMessage("bot", `Synchronisation terminée : ${sync.records_count} enregistrements ShotGrid mis à jour.`);
+      return;
+    }
+    if(sync?.status === "failed") throw new Error(sync.error || "Erreur de synchronisation");
+    $("sync-status").textContent = `Synchronisation en cours… ${sync?.records_count || 0} enregistrements traités`;
+    await new Promise(resolve => setTimeout(resolve, 2000));
+  }
+  throw new Error("La synchronisation prend trop de temps");
+}
+
+function toggleBusy(b){
+  $("send").hidden = b;
+  $("stop").hidden = !b;
+  input.disabled = b;
+}
+
+$("form").addEventListener("submit", e=>{
+  e.preventDefault();
+  const t = input.value.trim();
+  if(!t || controller) return;
+  input.value = ""; input.style.height = "auto";
+  send(t);
+});
+input.addEventListener("keydown", e=>{
+  if(e.key === "Enter" && !e.shiftKey && !e.isComposing){
+    e.preventDefault(); $("form").requestSubmit();
+  }
+});
+input.addEventListener("input", ()=>{
+  input.style.height = "auto";
+  input.style.height = Math.min(input.scrollHeight, 160) + "px";
+});
+$("stop").addEventListener("click", ()=> controller && controller.abort());
+$("clear").addEventListener("click", ()=>{
+  history = [];
+  chat.innerHTML = '<p class="empty" id="empty">Pose ta première question.</p>';
+});
+$("model").addEventListener("change", e=> store("ollama_model", e.target.value));
+$("gear").addEventListener("click", ()=>{
+  const o = $("settings").classList.toggle("open");
+  $("gear").setAttribute("aria-expanded", o);
+});
+$("save").addEventListener("click", ()=>{
+  baseUrl = $("url").value.trim().replace(/\/+$/,"") || DEFAULT_URL;
+  store("ollama_url", baseUrl);
+  $("settings").classList.remove("open");
+  loadModels();
+});
+$("sync").addEventListener("click", syncShotGrid);
+document.querySelectorAll(".nav button").forEach(button=>{
+  button.addEventListener("click", ()=>{
+    document.querySelectorAll(".nav button").forEach(item=>item.classList.remove("active"));
+    button.classList.add("active");
+    if(button.textContent.trim() === "Vue d'ensemble"){
+      $("project-detail-panel").hidden = true;
+      loadDashboard();
+    }else{
+      loadEntity(button.dataset.entity);
+    }
+  });
+});
+
+loadModels();
+if(location.port === "8000" || location.hostname === "localhost") loadDashboard();
+</script>
+</body>
+</html>
