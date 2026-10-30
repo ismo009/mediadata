@@ -285,32 +285,54 @@ export default function ChatAssistant({ isOpen, onClose }) {
   );
 }
 
+function decodeHtml(html) {
+  if (!html) return "";
+  return html
+    .replace(/&#x27;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">");
+}
+
 function SourcesDrawer({ sources }) {
   const [open, setOpen] = useState(false);
-  const sgCount = sources.shotgrid?.length || 0;
-  const driveCount = sources.google_drive?.length || 0;
+  const shotgrid = sources.shotgrid || [];
+  const drive = sources.google_drive || [];
+  const sgCount = shotgrid.length;
+  const driveCount = drive.length;
 
   if (sgCount === 0 && driveCount === 0) return null;
+
+  // Breakdown of entities
+  const typeCounts = shotgrid.reduce((acc, s) => {
+    const t = s.type || "Entité";
+    acc[t] = (acc[t] || 0) + 1;
+    return acc;
+  }, {});
+  const breakdownStr = Object.entries(typeCounts)
+    .map(([t, c]) => `${c} ${t}${c > 1 ? "s" : ""}`)
+    .join(", ");
 
   return (
     <div style={styles.sourcesBox}>
       <button onClick={() => setOpen(!open)} style={styles.sourcesHeader}>
         {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
         <span>
-          {sgCount} source{sgCount > 1 ? "s" : ""} ShotGrid analysée{sgCount > 1 ? "s" : ""}
+          {sgCount} source{sgCount > 1 ? "s" : ""} ShotGrid ({breakdownStr || "données"})
           {driveCount > 0 ? `, ${driveCount} Drive` : ""}
         </span>
       </button>
 
       {open && (
         <div style={styles.sourcesList}>
-          {sources.shotgrid?.map((s, idx) => (
+          {shotgrid.map((s, idx) => (
             <div key={idx} style={styles.sourceItem}>
               <span className="badge badge-default" style={{ fontSize: "0.65rem", padding: "0.15rem 0.45rem" }}>
                 {s.type}
               </span>
               <span style={{ fontSize: "0.78rem", color: "var(--text-main)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {s.name || `#${s.id}`}
+                {decodeHtml(s.name || `#${s.id}`)}
               </span>
               {s.source_url && (
                 <a
@@ -325,7 +347,7 @@ function SourcesDrawer({ sources }) {
               )}
             </div>
           ))}
-          {sources.google_drive?.map((d, idx) => (
+          {drive.map((d, idx) => (
             <div key={idx} style={styles.sourceItem}>
               <span className="badge badge-default" style={{ fontSize: "0.65rem", padding: "0.15rem 0.45rem" }}>
                 Drive
@@ -479,6 +501,9 @@ const styles = {
     display: "flex",
     flexDirection: "column",
     gap: "0.35rem",
+    maxHeight: "220px",
+    overflowY: "auto",
+    paddingRight: "4px",
   },
   sourceItem: {
     display: "flex",

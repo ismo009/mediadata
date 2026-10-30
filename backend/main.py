@@ -236,11 +236,23 @@ def cached_records(
     }
 
 
-def search_cached(question: str, limit: int = 30) -> list[dict[str, Any]]:
+STOP_WORDS = {
+    "le", "la", "les", "un", "une", "des", "du", "de", "d", "en", "au", "aux",
+    "et", "ou", "qui", "que", "quoi", "dont", "est", "sont", "a", "ont", "ce", "ces", "cet",
+    "cette", "quels", "quelles", "quel", "quelle", "comment", "pourquoi", "pour", "dans",
+    "sur", "avec", "sans", "sous", "par", "actuel", "actuels", "actuelle", "actuellement",
+    "projet", "projets", "donne", "moi", "affiche", "trouve", "faire", "tous", "toutes",
+    "peux", "faire", "voir", "liste", "combien", "the", "a", "an", "and", "or", "is",
+    "are", "of", "to", "in", "on", "with", "for", "about", "all"
+}
+
+
+def search_cached(question: str, limit: int = 75) -> list[dict[str, Any]]:
     connection = database()
     clean_q = question.strip()
+    lowered = clean_q.casefold()
 
-    # 1. Exact Note ID lookup: "note #1234"
+    # 1. Exact Note lookup: "note #1234"
     note_id = re.search(r"\bnote\s*#?\s*(\d+)\b", clean_q, re.IGNORECASE)
     if note_id:
         row = connection.execute(
@@ -254,19 +266,42 @@ def search_cached(question: str, limit: int = 30) -> list[dict[str, Any]]:
                 **with_source_url(json.loads(row["data_json"]), row["entity_type"]),
             }]
 
-    # 2. Project name match in question
+    # 2. General Project Question: "Quels sont les projets actifs ?", "liste des projets", etc.
+    # When asking about projects as a collection (and not targeting a specific single project name)
+    is_general_project_query = bool(
+        re.search(r"\b(projets?|projects?)\b", lowered)
+        and not re.search(r"\b(projet|project)\s+[A-Za-z0-9_]{3,}", lowered)
+    )
+
+    if is_general_project_query:
+        # Return ALL projects so none are omitted
+        project_rows = connection.execute(
+            """
+            SELECT entity_type, data_json FROM shotgrid_records
+            WHERE entity_type = 'Project'
+            ORDER BY name COLLATE NOCASE
+            """
+        ).fetchall()
+        connection.close()
+        return [
+            {
+                "entity_type": "Project",
+                **with_source_url(json.loads(row["data_json"]), "Project"),
+            }
+            for row in project_rows
+        ]
+
+    # 3. Targeted Project Name Lookup in question (e.g. "sur le projet Entre les murs", "Devant les Projecteurs")
     project_rows = connection.execute(
         "SELECT entity_id, name, data_json FROM shotgrid_records WHERE entity_type='Project' AND name IS NOT NULL ORDER BY length(name) DESC"
     ).fetchall()
-    lowered = clean_q.casefold()
     matched_project = next(
-        (row for row in project_rows if row["name"].casefold() in lowered),
+        (row for row in project_rows if row["name"] and row["name"].casefold() in lowered),
         None,
     )
 
     if matched_project:
         project_id = matched_project["entity_id"]
-        # Detect sub-entity
         requested_type = None
         if re.search(r"\b(tâche|taches|tasks?)\b", lowered):
             requested_type = "Task"
@@ -301,7 +336,7 @@ def search_cached(question: str, limit: int = 30) -> list[dict[str, Any]]:
         connection.close()
         results = [
             {
-                "entity_type": matched_project["name"],
+                "entity_type": "Project",
                 **with_source_url(json.loads(matched_project["data_json"]), "Project"),
             }
         ]
@@ -314,10 +349,31 @@ def search_cached(question: str, limit: int = 30) -> list[dict[str, Any]]:
         ])
         return results
 
-    # 3. FTS5 Full-Text Search
-    clean_words = re.findall(r"[\wÀ-ÿ0-9_-]{3,}", clean_q)
-    if clean_words:
-        fts_query = " OR ".join(f'"{w}"*' for w in clean_words[:6])
+    # 4. Entity type focus: notes, tasks, shots
+    if re.search(r"\b(note|notes|retours?)\b", lowered):
+        note_rows = connection.execute(
+            """
+            SELECT entity_type, data_json FROM shotgrid_records
+            WHERE entity_type = 'Note'
+            ORDER BY entity_id DESC LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        if note_rows:
+            connection.close()
+            return [
+                {
+                    "entity_type": "Note",
+                    **with_source_url(json.loads(row["data_json"]), "Note"),
+                }
+                for row in note_rows
+            ]
+
+    # 5. Smart FTS5 Full-Text Search (filtered keywords without stop words)
+    raw_words = re.findall(r"[\wÀ-ÿ0-9_-]{3,}", lowered)
+    keywords = [w for w in raw_words if w not in STOP_WORDS]
+    if keywords:
+        fts_query = " OR ".join(f'"{w}"*' for w in keywords[:8])
         try:
             fts_rows = connection.execute(
                 """
@@ -342,7 +398,7 @@ def search_cached(question: str, limit: int = 30) -> list[dict[str, Any]]:
         except Exception:
             pass
 
-    # 4. Fallback LIKE search
+    # 6. Fallback LIKE search
     pattern = f"%{clean_q}%"
     rows = connection.execute(
         """
@@ -364,32 +420,57 @@ def search_cached(question: str, limit: int = 30) -> list[dict[str, Any]]:
 
 
 def compact_record_for_llm(record: dict[str, Any], entity_type: str) -> dict[str, Any]:
-    """Prunes noisy metadata from records to preserve LLM token context."""
+    """Prunes noisy metadata from records to preserve LLM token context while retaining exact business clarity."""
     compact: dict[str, Any] = {
         "type": entity_type,
         "id": record.get("id"),
         "name": record.get("name") or record.get("code") or record.get("cached_display_name"),
     }
-    if "sg_status_list" in record:
-        compact["status"] = record["sg_status_list"]
-    elif "sg_status" in record:
-        compact["status"] = record["sg_status"]
 
-    if record.get("project"):
-        compact["project"] = record["project"].get("name") if isinstance(record["project"], dict) else record["project"]
+    if entity_type == "Project":
+        sg_st = record.get("sg_status")
+        is_archived = record.get("archived", False)
+        is_tmpl = record.get("is_template", False)
+        is_demo = record.get("is_demo", False)
 
-    if "task_assignees" in record and record["task_assignees"]:
-        compact["assigned_to"] = [u.get("name") for u in record["task_assignees"] if isinstance(u, dict)]
+        if is_archived:
+            compact["status"] = "Archivé"
+        elif is_tmpl:
+            compact["status"] = "Template"
+        elif is_demo:
+            compact["status"] = "Démo (Actif)"
+        elif sg_st == "Active":
+            compact["status"] = "Actif"
+        else:
+            compact["status"] = "Actif / En production"
 
-    if record.get("content"):
-        compact["content"] = str(record["content"])[:500]
-    if record.get("subject"):
-        compact["subject"] = record["subject"]
+        if record.get("start_date"):
+            compact["start_date"] = record["start_date"]
+        if record.get("end_date"):
+            compact["end_date"] = record["end_date"]
+    else:
+        if "sg_status_list" in record:
+            compact["status"] = record["sg_status_list"]
+        elif "sg_status" in record:
+            compact["status"] = record["sg_status"]
 
-    if record.get("start_date"):
-        compact["start_date"] = record["start_date"]
-    if record.get("end_date"):
-        compact["end_date"] = record["end_date"]
+        if record.get("project"):
+            compact["project"] = record["project"].get("name") if isinstance(record["project"], dict) else record["project"]
+
+        if "task_assignees" in record and record["task_assignees"]:
+            compact["assigned_to"] = [u.get("name") for u in record["task_assignees"] if isinstance(u, dict)]
+
+        if record.get("content"):
+            compact["content"] = str(record["content"])[:400]
+        if record.get("subject"):
+            compact["subject"] = record["subject"]
+
+        if record.get("start_date"):
+            compact["start_date"] = record["start_date"]
+        if record.get("due_date"):
+            compact["due_date"] = record["due_date"]
+        elif record.get("end_date"):
+            compact["end_date"] = record["end_date"]
 
     if record.get("source_url"):
         compact["source_url"] = record["source_url"]
@@ -716,17 +797,45 @@ async def search_drive(user: dict[str, Any], question: str) -> list[dict[str, An
 
 
 SYSTEM_PROMPT = """
-Tu es l'assistant de production expert du dashboard Studio Ops (ShotGrid & Google Drive).
-Tu réponds en français clair, précis et professionnel.
+Tu es l'assistant IA officiel de Studio Ops, Directeur Technique et Superviseur de Production expert (VFX, 3D, Animation).
+Tu analyses en direct les données synchronisées depuis Autodesk ShotGrid et Google Drive pour assister les équipes de studio.
+Tu réponds en français clair, précis, professionnel et parfaitement structuré en Markdown.
 
-Règles impératives :
-1. Utilise uniquement les données présentes dans les SOURCES fournies.
-2. Analyse toutes les sources avant de répondre.
-3. Identifie les entités par leur type et identifiant (Project, Shot, Task, Asset, Version, Note, HumanUser).
-4. Pour une question sur les statuts ou retards, sois précis sur les assignations et échéances.
-5. Quand une source contient `source_url`, insère le lien Markdown cliquable : [Voir dans ShotGrid](source_url).
-6. Si aucune information ne répond à la question, dis-le clairement sans inventer.
-7. Termine par une brève mention des sources utilisées.
+═══════════════════════════════════════════════════════════════
+DIRECTIVES ET DÉCODAGE DES STATUTS SHOTGRID
+═══════════════════════════════════════════════════════════════
+1. STATUT DES PROJETS :
+   - Un projet est ACTIF si son statut est "Active" ou "Actif / En production" (archived = False et non template).
+   - Les projets avec statut "Archivé" (archived = True) sont archivés ou terminés.
+   - Les projets avec statut "Template" sont des modèles de configuration.
+   - Ne confonds JAMAIS le statut d'une tâche, shot ou note (ex: wtg, ip, rev, apr, fin) avec le statut d'un projet !
+
+2. CODES DE STATUT DE PRODUCTION (Tâches, Shots, Versions, Assets) :
+   - `wtg` : ⏳ En attente / Prêt à démarrer (Waiting to start)
+   - `ip`  : ⚙️ En cours de réalisation (In progress)
+   - `rev` : 👀 En attente de validation / review (Pending review)
+   - `fin` : ✅ Terminé (Finished)
+   - `apr` : 🌟 Approuvé (Approved)
+   - `opn` : 📝 Ouvert (Open - pour les notes et tickets)
+   - `clsd`: 🔒 Fermé / Résolu (Closed)
+
+═══════════════════════════════════════════════════════════════
+RÈGLES D'OR DE FIDÉLITÉ (ANTI-HALLUCINATION)
+═══════════════════════════════════════════════════════════════
+1. Base TOUTE réponse exclusivement sur les données JSON fournies dans les SOURCES.
+2. Ne fabrique JAMAIS de noms, d'identifiants (ID), de dates ou de métadonnées qui n'existent pas dans les sources.
+3. Si une information demandée n'apparaît pas dans les données fournies, dis-le clairement avec honnêteté.
+4. Identifie toujours les éléments par leur type et ID exact : ex. Projet `Entre les murs` (ID 224).
+
+═══════════════════════════════════════════════════════════════
+FORMATAGE ET PRÉSENTATION DES RÉPONSES
+═══════════════════════════════════════════════════════════════
+1. Structure ta réponse avec des titres de section Markdown (`###`), des listes à puces aérées ou des tableaux clairs.
+2. Utilise des badges visuels clairs pour les statuts (ex: `🟢 Actif`, `⏳ En attente`, `👀 En review`, `✅ Terminé`).
+3. LIENS SHOTGRID : Quand une source fournit `source_url`, insère le lien Markdown en utilisant le NOM DE L'ÉLÉMENT comme libellé.
+   - Exemple CORRECT : `[Devant les Projecteurs (ID 223)](url)` ou `[Plan 001_030](url)`
+   - Exemple INTERDIT : Ne génère JAMAIS de lien avec le libellé générique `[ShotGrid](url)` ou `[Voir dans ShotGrid](url)` répété 10 fois.
+4. Conclus toujours par un récapitulatif synthétique (ex: « Total : 35 projets actifs identifiés dans la base ShotGrid »).
 """
 
 
@@ -735,15 +844,21 @@ async def query_stream(request: Request, payload: QueryRequest):
     user = request.session.get("user", {})
     drive = await search_drive(user, payload.question)
 
-    context_questions = " ".join(
-        message.get("content", "")
-        for message in payload.history[-6:]
-        if message.get("role") == "user"
-    )
-    search_q = f"{context_questions} {payload.question}".strip()
-    shotgrid_raw = search_cached(search_q, limit=25)
+    # Use question primarily for retrieval to avoid topic drift from history
+    search_q = payload.question.strip()
+    if len(search_q.split()) <= 3 and payload.history:
+        # If very short follow-up question (e.g. "et ses tâches ?"), append last user question
+        last_user_msg = next(
+            (m.get("content", "") for m in reversed(payload.history) if m.get("role") == "user"),
+            ""
+        )
+        if last_user_msg:
+            search_q = f"{last_user_msg} {search_q}".strip()
 
-    # Compact sources to protect token window
+    # Search with higher limit (up to 75 sources)
+    shotgrid_raw = search_cached(search_q, limit=75)
+
+    # Compact sources to protect token window while keeping business semantics
     shotgrid = [
         compact_record_for_llm(r, r.get("entity_type", "Unknown"))
         for r in shotgrid_raw
@@ -813,7 +928,7 @@ async def query_legacy(request: Request, payload: QueryRequest) -> dict[str, Any
     # Backward compatibility endpoint
     user = request.session.get("user", {})
     drive = await search_drive(user, payload.question)
-    shotgrid_raw = search_cached(payload.question, limit=20)
+    shotgrid_raw = search_cached(payload.question, limit=75)
     shotgrid = [compact_record_for_llm(r, r.get("entity_type", "Unknown")) for r in shotgrid_raw]
     sources = {"shotgrid": shotgrid, "google_drive": drive}
 
