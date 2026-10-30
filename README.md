@@ -1,29 +1,42 @@
 # Studio Ops — Production Dashboard & Assistant IA
 
-Dashboard local moderne de supervision de studio VFX / Animation connecté à **Autodesk ShotGrid** (Flow Production Tracking), **Ollama** (LLM local) et, en option, **Google Drive**.
+Dashboard local haute performance pour la supervision de studios d'animation et VFX, connecté en temps réel à **Autodesk ShotGrid** (Flow Production Tracking), **Ollama** (LLM local en streaming SSE) et, en option, **Google Drive**.
 
-L'application associe un backend haute performance sous **FastAPI** et **SQLite (FTS5)** à une interface réactive développée en **React (Vite)**.
-
----
-
-## 🌟 Fonctionnalités
-
-- **Interface React moderne** : navigation fluide par projet, shots, tâches, notes, versions et assets.
-- **Cartes KPI & Supervision** : suivi instantané des projets actifs, volumes de tâches et dernière synchronisation.
-- **Explorateur Master-Detail** : consultation d'un projet avec onglets dédiés (*Tâches*, *Shots*, *Notes*, *Versions*, *Assets*) et liens directs vers ShotGrid.
-- **Grille de données paginée (DataGrid)** : recherche instantanée, filtres par statut et pagination serveur pour naviguer confortablement dans plus de 16 000 enregistrements.
-- **Assistant IA en Streaming temps réel (SSE)** : réponses mot-par-mot propulsées par Ollama, rendu Markdown complet, accordéon des sources consultées et sélecteur de modèle.
-- **Moteur de recherche Full-Text (SQLite FTS5)** : indexation ultra-rapide des notes, descriptions et noms.
-- **Synchronisation ShotGrid en arrière-plan** : cache local structuré et indexé, sans bloquer l'interface.
+L'application associe un backend **FastAPI + SQLite (indexation relationnelle & recherche plein-texte FTS5)** à une interface réactive développée en **React (Vite)** suivant une direction artistique studio sombre et immersive.
 
 ---
 
-## 🏗️ Architecture
+## 🌟 Fonctionnalités Principales
+
+### 🖥️ Interface & Ergonomie (DA Studio Obsidian)
+- **Palette Studio Sombre** : Design inspiré des standards studio (*Autodesk Flow*, *Linear*, *Raycast*) avec typographie premium **Plus Jakarta Sans** et **JetBrains Mono**.
+- **Vue d'ensemble & KPIs en direct** : Suivi des projets actifs, volumes de tâches, plans (shots) et notes synchronisées.
+- **Catalogue de Projets filtrable** : Recherche instantanée, filtrage par statut (*Tous*, *Actifs*), avatars de projet dynamiques et liens directs ShotGrid.
+- **Espace Projet (Master-Detail)** : Navigation par projet avec onglets dédiés (*Tâches*, *Shots*, *Notes*, *Versions*, *Assets*), compteurs numériques intégrés et fil d'Ariane intuitif.
+- **Grille de Données Paginée (DataGrid)** : Recherche plein-texte, filtres par statut de production et pagination serveur pour explorer sans latence plus de **16 500 enregistrements**.
+
+### 🤖 Assistant IA & Moteur RAG v2
+- **Streaming mot-par-mot (SSE)** : Réponses en direct propulsées par Ollama sans aucun temps mort.
+- **Capacité étendue à 75–80 sources** : Contexte riche et précis avec compactage intelligent des données pour respecter la fenêtre de tokens.
+- **Routage sémantique d'intention** :
+  - *Questions générales sur les projets* (ex: « Quels sont les projets actifs ? ») : injection de **100 % des projets de la base** (55 projets) pour une exhaustivité totale sans notes parasites.
+  - *Questions ciblées sur un projet* (ex: « Tâches de Devant les Projecteurs ») : récupération de la fiche projet et des tâches, shots ou notes rattachés spécifiquement à ce projet.
+  - *Recherche plein-texte FTS5* : filtrage automatique des mots vides (*stop-words*) pour cibler les mots-clés techniques (*texturing*, *caméra*, *roto*, etc.).
+- **Master Prompt Superviseur VFX** :
+  - Décodage rigoureux des statuts ShotGrid : `wtg` (En attente), `ip` (En cours), `rev` (En review), `fin` (Terminé), `apr` (Approuvé).
+  - Distinction nette entre statut projet (`Actif`, `Archivé`, `Template`) et statuts de tâches.
+  - Règle anti-hallucination stricte (interdiction d'inventer des ID ou des noms).
+  - Liens Markdown contextuels : `[Devant les Projecteurs (ID 223)](url)` au lieu de liens génériques répétitifs.
+- **Tiroir des Sources Interactif** : Accordéon détaillé avec répartition par type d'entités (ex. *55 Projets* ou *52 Tâches, 13 Shots*) et liens directs ShotGrid.
+
+---
+
+## 🏗️ Architecture Technique
 
 ```text
-       Navigateur Web (React + Vite)
+       Navigateur Web (React 18 + Vite)
                      │
-       (HTTP REST & Server-Sent Events)
+       (HTTP REST & Server-Sent Events / SSE)
                      │
                      ▼
           Backend FastAPI (Uvicorn)
@@ -33,40 +46,40 @@ L'application associe un backend haute performance sous **FastAPI** et **SQLite 
    ShotGrid     (LLM Local)  (Optionnel)
          │
          ▼
-  SQLite 3 (B-Tree + FTS5 Full-Text)
+  SQLite 3 (B-Tree + FTS5 Full-Text Search)
 ```
 
-### Arborescence du projet
+### Arborescence du Projet
 
 ```text
 html_server/
-├── README.md               # Documentation du projet
-├── requirements.txt        # Dépendances Python (FastAPI, ShotGrid, etc.)
+├── README.md               # Documentation complète du projet
+├── requirements.txt        # Dépendances Python (FastAPI, ShotGrid API, etc.)
 ├── .env.example            # Modèle des variables d'environnement
-├── .gitignore              # Protection des secrets et fichiers générés
-├── test_api_rest.py        # Script de test de connexion ShotGrid
-├── dashboard.sqlite3       # Base SQLite locale (indexée + FTS5)
+├── .gitignore              # Protection des secrets (.env) et bases locales
+├── test_api_rest.py        # Script de test de connexion directe ShotGrid
+├── dashboard.sqlite3       # Base SQLite locale indexée (16 500+ records)
 │
 ├── backend/
 │   ├── __init__.py
-│   ├── main.py             # API FastAPI, streaming SSE, cache & RAG
-│   └── migrate_db.py       # Script d'indexation et migration FTS5
+│   ├── main.py             # API FastAPI, moteur RAG, streaming SSE & cache
+│   └── migrate_db.py       # Script d'indexation SQLite et création table FTS5
 │
-└── frontend/               # Application React moderne
+└── frontend/               # Application React moderne (Vite)
     ├── package.json        # Dépendances NPM (React, Lucide, React-Markdown)
     ├── vite.config.js      # Configuration Vite avec proxy backend
     ├── index.html          # Point d'entrée HTML
-    ├── dist/               # Build de production (servi par FastAPI)
+    ├── dist/               # Build de production (servi directement par FastAPI)
     └── src/
-        ├── App.jsx         # Composant racine et gestion d'état
-        ├── api.js          # Client HTTP et streaming SSE
-        ├── index.css       # Design System sombre pour studio
+        ├── App.jsx         # Composant racine et gestion d'état globale
+        ├── api.js          # Client HTTP fetch et streaming SSE
+        ├── index.css       # Design System studio (Obsidian & Electric Indigo)
         └── components/
-            ├── Sidebar.jsx           # Barre latérale & statut sync
-            ├── DashboardOverview.jsx # KPIs & grille de projets
-            ├── ProjectDetail.jsx     # Vue détaillée par projet (onglets)
-            ├── EntityTable.jsx       # Tableau paginé avec filtres
-            └── ChatAssistant.jsx     # Assistant IA conversationnel en streaming
+            ├── Sidebar.jsx           # Barre latérale & statut de synchronisation
+            ├── DashboardOverview.jsx # Métriques KPIs & grille des projets
+            ├── ProjectDetail.jsx     # Vue détaillée par projet avec onglets
+            ├── EntityTable.jsx       # Tableau paginé serveur avec filtres
+            └── ChatAssistant.jsx     # Assistant conversationnel streaming & sources
 ```
 
 ---
@@ -75,11 +88,11 @@ html_server/
 
 - **macOS**, **Linux** ou **Windows**
 - **Python 3.9+**
-- **Node.js 18+** & **npm** (installé sur le Mac : v26.11 / npm 11)
-- **Ollama** lancé localement avec au moins un modèle (ex: `llama3.1`, `mistral`, etc.)
-- Un accès à un site **Autodesk ShotGrid**
+- **Node.js 18+** & **npm**
+- **Ollama** lancé localement avec au moins un modèle installé (ex: `llama3.1`, `mistral`)
+- Un compte ou accès script sur un site **Autodesk ShotGrid**
 
-Vérifiez vos installations :
+Vérifiez vos versions :
 ```bash
 python3 --version
 node -v
@@ -91,14 +104,14 @@ ollama list
 
 ## ⚙️ Installation & Configuration
 
-### 1. Dépendances Python
+### 1. Installation des dépendances Python
 
 ```bash
 cd /Users/lolot/html_server
 python3 -m pip install -r requirements.txt
 ```
 
-### 2. Dépendances Frontend
+### 2. Installation et compilation du Frontend React
 
 ```bash
 cd frontend
@@ -107,101 +120,85 @@ npm run build
 cd ..
 ```
 
-### 3. Fichier d'environnement (`.env`)
+### 3. Configuration des variables d'environnement (`.env`)
 
-Copiez le modèle et renseignez vos identifiants :
+Copiez le fichier d'exemple :
 ```bash
 cp .env.example .env
 ```
 
-Modifiez `.env` avec vos accès :
+Éditez `.env` avec vos identifiants :
 ```env
-APP_SECRET=votre-cle-secrete-longue
+APP_SECRET=votre-cle-secrete-aleatoire-et-longue
 APP_BASE_URL=http://localhost:8000
 
-# Ollama
+# Configuration Ollama
 OLLAMA_URL=http://localhost:11434
 OLLAMA_MODEL=llama3.1:latest
 
-# Autodesk ShotGrid
+# Autodesk ShotGrid (Authentification utilisateur ou script)
 SHOTGRID_SERVER_URL=https://votre-site.shotgrid.autodesk.com
-SHOTGRID_LOGIN=votre_login
+SHOTGRID_LOGIN=votre_identifiant
 SHOTGRID_PASSPHRASE=votre_passphrase
-SHOTGRID_PAT=votre_pat
+SHOTGRID_PAT=votre_personal_access_token
 
-# Ou authentification par Script (alternative) :
+# Ou via Script Key :
 # SHOTGRID_SCRIPT_NAME=mon_script
 # SHOTGRID_SCRIPT_KEY=ma_cle_api
 
 # Google Drive (Optionnel)
-# GOOGLE_ACCESS_TOKEN=token-drive-si-disponible
+# GOOGLE_ACCESS_TOKEN=token_optionnel
 ```
 
-> ⚠️ **Sécurité** : Le fichier `.env` et la base `dashboard.sqlite3` sont exclus de Git via `.gitignore`. Ne committez jamais vos secrets.
+> 🔒 **Sécurité** : Le fichier `.env` et la base `dashboard.sqlite3` sont exclus de Git. Ne partagez jamais vos clés API ou tokens.
 
 ---
 
-## 🚀 Démarrage
+## 🚀 Lancement de l'Application
 
-### Option A : Mode Standard / Production (Recommandé)
-
+### Mode Standard / Production (Recommandé)
 FastAPI sert directement l'interface React compilée :
 
 ```bash
 python3 -m uvicorn backend.main:app --reload --port 8000
 ```
 
-Ouvrez ensuite dans votre navigateur :
+Ouvrez votre navigateur sur :
 👉 **`http://localhost:8000`**
 
-### Option B : Mode Développement Frontend (Hot-Reload)
-
-Pour modifier les composants React avec rechargement instantané :
+### Mode Développement Frontend (Hot-Reload)
+Pour travailler sur les composants React avec rechargement instantané :
 
 1. **Terminal 1 (Backend FastAPI)** :
    ```bash
    python3 -m uvicorn backend.main:app --reload --port 8000
    ```
-
 2. **Terminal 2 (Serveur Vite)** :
    ```bash
    cd frontend
    npm run dev
    ```
-   👉 Ouvrez **`http://localhost:5173`** *(tous les appels `/api` et `/auth` sont automatiquement redirigés vers FastAPI sur le port 8000)*.
+   👉 Ouvrez **`http://localhost:5173`** *(les requêtes `/api` et `/auth` sont automatiquement redirigées vers FastAPI)*.
 
 ---
 
-## 🔄 Synchronisation ShotGrid
+## 🔄 Synchronisation ShotGrid & Base SQLite
 
-1. Lancez le serveur et ouvrez l'interface.
-2. Dans le panneau latéral gauche en bas, cliquez sur l'icône de rafraîchissement à côté de **ShotGrid Sync**.
-3. La synchronisation s'exécute en tâche de fond (`completed` dès que terminée).
+1. Lancez l'application et ouvrez l'interface web.
+2. Dans la barre latérale gauche (en bas), cliquez sur le bouton de rafraîchissement à côté de **ShotGrid Cache**.
+3. La synchronisation s'exécute en tâche de fond (`completed` une fois terminée) et met à jour les entités :
+   - `Project`
+   - `Shot`
+   - `Task`
+   - `Asset`
+   - `Version`
+   - `HumanUser`
+   - `Note`
 
-Entités synchronisées :
-- `Project`
-- `Shot`
-- `Task`
-- `Asset`
-- `Version`
-- `HumanUser`
-- `Note`
-
-Pour forcer une réindexation SQLite et FTS5 manuelle :
+Pour forcer manuellement la réindexation SQLite et la reconstruction de la table plein-texte FTS5 :
 ```bash
 python3 backend/migrate_db.py
 ```
-
----
-
-## 🤖 Assistant IA & RAG
-
-L'assistant intelligent situé dans le volet droit :
-- Analyse votre question et extrait les entités pertinentes via la recherche **SQLite FTS5** et la base relationnelle.
-- Épure le JSON transmis au LLM pour éviter d'engorger la fenêtre de tokens.
-- Streame la réponse en direct via Server-Sent Events (**SSE**).
-- Affiche un accordéon des **sources consultées** avec liens cliquables vers ShotGrid.
-- Permet de changer de modèle Ollama à la volée depuis le menu déroulant.
 
 ---
 
@@ -209,39 +206,39 @@ L'assistant intelligent situé dans le volet droit :
 
 | Méthode | Route | Description |
 |---|---|---|
-| `GET` | `/api/health` | Vérifie l'état de l'API (`{"status": "ok"}`) |
-| `GET` | `/api/models` | Liste les modèles Ollama installés localement |
-| `GET` | `/api/dashboard` | Métriques globales et liste des projets |
-| `GET` | `/api/projects/{id}` | Détail complet d'un projet et ses entités liées |
+| `GET` | `/api/health` | Vérification de l'état de santé de l'API |
+| `GET` | `/api/models` | Liste des modèles Ollama détectés localement |
+| `GET` | `/api/dashboard` | Métriques globales (KPIs) et liste des projets |
+| `GET` | `/api/projects/{id}` | Détail complet d'un projet et entités rattachées |
 | `GET` | `/api/data/{entity}` | Données paginées (`?page=1&limit=50&search=...&status=...`) |
-| `POST` | `/api/sync` | Lance une synchronisation ShotGrid en arrière-plan |
-| `GET` | `/api/sync/status` | Statut de la dernière synchronisation |
-| `POST` | `/api/query/stream` | Requête assistant IA en **streaming SSE** |
-| `POST` | `/api/query` | Requête assistant IA standard (compatibilité JSON) |
-| `GET` | `/auth/google/login` | Initialisation de la connexion Google OAuth |
-| `GET` | `/auth/google/callback` | Callback de redirection Google |
-| `POST` | `/auth/logout` | Déconnexion |
-| `GET` | `/api/me` | Informations de session utilisateur |
+| `POST` | `/api/sync` | Déclenche une synchronisation ShotGrid en tâche de fond |
+| `GET` | `/api/sync/status` | Statut et historique de la dernière synchronisation |
+| `POST` | `/api/query/stream` | Assistant IA en **streaming temps réel SSE** (RAG v2) |
+| `POST` | `/api/query` | Assistant IA standard (réponse JSON non-streamée) |
+| `GET` | `/auth/google/login` | Initialisation de l'authentification Google OAuth |
+| `GET` | `/auth/google/callback` | Callback de retour Google OAuth |
+| `POST` | `/auth/logout` | Déconnexion de la session utilisateur |
+| `GET` | `/api/me` | Informations de la session courante |
 
 ---
 
-## 🛠️ Dépannage rapide
+## 🛠️ Dépannage Fréquent
 
-### `zsh: command not found: uvicorn`
-Utilisez la syntaxe module Python :
+### `uvicorn: command not found`
+Utilisez la commande via le module Python :
 ```bash
 python3 -m uvicorn backend.main:app --reload --port 8000
 ```
-*(Ou ajoutez `export PATH="$HOME/Library/Python/3.9/bin:$PATH"` dans votre `~/.zshrc`)*.
+*(Pour créer un raccourci direct, ajoutez `export PATH="$HOME/Library/Python/3.9/bin:$PATH"` dans votre `~/.zshrc`)*.
 
 ### `Ollama est indisponible`
-Vérifiez qu'Ollama est bien démarré :
+Vérifiez qu'Ollama est bien lancé sur votre machine :
 ```bash
 curl http://localhost:11434/api/tags
 ```
 
-### Le frontend React ne reflète pas les dernières modifications
-Recompilez les assets :
+### L'interface ne prend pas en compte les dernières modifications
+Recompilez les assets React :
 ```bash
 cd frontend && npm run build
 ```
