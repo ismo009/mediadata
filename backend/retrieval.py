@@ -10,6 +10,7 @@ import re
 import sqlite3
 import unicodedata
 from dataclasses import dataclass, field
+from difflib import SequenceMatcher
 from typing import Any, Optional
 
 from backend.db import database
@@ -45,7 +46,9 @@ TYPE_PATTERNS = [
 ]
 
 STATUS_PATTERNS = [
-    ("waiting", r"\b(en attente|wtg|waiting|pas commence|a faire|todo|rdy)\b"),
+    # "open" = anything not finished; checked first ("tâches ouvertes", "restantes", "à faire").
+    ("open", r"\b(ouverte?s?|open|restante?s?|non terminee?s?|pas terminee?s?|a faire|todo)\b"),
+    ("waiting", r"\b(en attente|wtg|waiting|pas commence|rdy)\b"),
     ("in_progress", r"\b(en cours|ip|in progress|wip)\b"),
     ("review", r"\b(en review|review|rev|a valider|en validation|pending review)\b"),
     ("done", r"\b(termine(e|es|s)?|finis?|fin|approuve(e|es|s)?|apr|done|final(e|es|s)?)\b"),
@@ -60,10 +63,16 @@ BUCKET_CODES = {
 LATE_RE = r"\b(retards?|en retard|late|overdue|depasse(e|es|s)?|echeances? depassee?s?)\b"
 BLOCKED_RE = r"\b(bloque(e|es|s)?|blocked|blocages?|dependances?|bloquant(e|es|s)?)\b"
 COUNT_RE = (
-    r"\b(combien|nombre|how many|total|repartition|statistiques?|stats?|resume|bilan|"
-    r"avancement|progression|progress|etat|overview|synthese)\b"
+    r"\b(combien|nombre|how many|total|repartition|statistiques?|stats?|bilan|"
+    r"le plus|le moins|classement|top|qui a)\b"
 )
-PROJECTS_RE = r"\b(projets?|projects?)\b"
+# Aggregate questions are answered from the exact stats: a short sample of items is enough.
+COUNTING_RECORD_LIMIT = 10
+# Ranking questions ("qui a le plus…") are answered only from the stats: listing items makes
+# small models count the list instead of reading the ranking.
+RANK_RE = r"\b(le plus|le moins|classement|top \d*|la plus|les plus)\b"
+PROJECTS_RE = r"\b(projets?|projects?|productions?)\b"
+ACTIVE_RE = r"\b(actif|actifs|active|actives|en cours|en production)\b"
 
 DONE_SQL = ",".join(f"'{s}'" for s in sorted(DONE_STATUSES))
 
@@ -92,21 +101,34 @@ class Scope:
         return any([self.project, self.sequence, self.step, self.person, self.bucket,
                     self.late, self.blocked])
 
-    def describe(self) -> str:
+    def describe(self, target: Optional[str] = None) -> str:
+        """Human (French) description of the scope, e.g. 'tâches, production « X », en retard'."""
         parts = []
-        if self.entity_type:
-            parts.append(f"type={self.entity_type}")
-        for label, value in (("projet", self.project), ("séquence", self.sequence),
+        entity_type = target or self.entity_type
+        if entity_type:
+            parts.append(TYPE_LABELS.get(entity_type, entity_type))
+        for label, value in (("production", self.project), ("séquence", self.sequence),
                              ("étape", self.step), ("personne", self.person)):
             if value:
-                parts.append(f"{label}={value['name']} (ID {value['id']})")
+                parts.append(f"{label} « {value['name']} »")
         if self.bucket:
-            parts.append(f"statut={self.bucket}")
+            parts.append(BUCKET_LABELS[self.bucket])
         if self.late:
-            parts.append("en retard")
+            parts.append("en retard (échéance dépassée, non terminées)")
         if self.blocked:
-            parts.append("bloquées par une tâche amont")
+            parts.append("bloquées par une tâche amont non terminée")
         return ", ".join(parts) or "recherche libre"
+
+
+TYPE_LABELS = {
+    "Task": "tâches", "Shot": "plans", "Sequence": "séquences", "Asset": "assets", "Version": "versions",
+    "Note": "notes", "TimeLog": "temps saisis", "Playlist": "playlists", "PublishedFile": "fichiers publiés",
+    "Project": "productions", "HumanUser": "personnes",
+}
+BUCKET_LABELS = {
+    "open": "non terminées", "waiting": "en attente", "in_progress": "en cours",
+    "review": "en review", "done": "terminées",
+}
 
 
 # --------------------------------------------------------------------------- parsing
@@ -154,8 +176,56 @@ def _find_in(question: str, candidates: list[dict], min_len: int = 3) -> Optiona
     return best
 
 
+LEADING_ARTICLES = re.compile(r"^(les|des|le|la|l|du|de|d|the)\s+")
+FUZZY_MIN_RATIO = 0.86
+FUZZY_MIN_CHARS = 6
+
+
+def _core(text: str) -> str:
+    """Words only, no leading article: 'Les Cocottes en Papier' -> 'cocottes en papier'."""
+    words = " ".join(re.findall(r"\w+", text))
+    return LEADING_ARTICLES.sub("", words)
+
+
+def _fuzzy_find(question: str, candidates: list[dict]) -> Optional[dict]:
+    """Best candidate whose name approximately appears in the question (typos, other article).
+
+    'des cocottes en pappier' matches 'Les Cocottes en Papier'. Each alias is compared with
+    every window of the question of about the same number of words.
+    """
+    words = re.findall(r"\w+", question)
+    best, best_score = None, FUZZY_MIN_RATIO
+    for candidate in candidates:
+        for alias in candidate["aliases"]:
+            full = _core(alias)
+            alias_words = full.split()
+            # The full name, plus its leading words ("stranger things" for "Stranger Things - PXFK"),
+            # slightly penalised so a full match always wins.
+            variants = [(full, 1.0)] + [
+                (" ".join(alias_words[:k]), 0.97) for k in range(2, len(alias_words))
+            ]
+            for core, weight in variants:
+                if len(core) < FUZZY_MIN_CHARS:
+                    continue
+                n = len(core.split())
+                for size in {max(1, n - 1), n, n + 1}:
+                    for i in range(len(words) - size + 1):
+                        chunk = _core(" ".join(words[i:i + size]))
+                        if not chunk or abs(len(chunk) - len(core)) > max(3, len(core) // 4):
+                            continue
+                        score = SequenceMatcher(None, core, chunk).ratio() * weight
+                        if score > best_score:
+                            best, best_score = candidate, score
+    return best
+
+
+def _find_named(question: str, candidates: list[dict], min_len: int = 3) -> Optional[dict]:
+    """Exact whole-word match first, then a tolerant match for typos."""
+    return _find_in(question, candidates, min_len) or _fuzzy_find(question, candidates)
+
+
 def _find_person(question: str, people: list[dict]) -> Optional[dict]:
-    match = _find_in(question, people, min_len=5)
+    match = _find_named(question, people, min_len=5)
     if match:
         return match
     # A single first or last name (>= 4 letters) that identifies exactly one person.
@@ -171,7 +241,7 @@ def _find_person(question: str, people: list[dict]) -> Optional[dict]:
 def parse_question(connection: sqlite3.Connection, question: str) -> Scope:
     q = normalize(question)
     scope = Scope()
-    scope.project = _find_in(q, _named(connection, "Project"))
+    scope.project = _find_named(q, _named(connection, "Project"))
     scope.sequence = _find_in(q, _named(connection, "Sequence"))
     scope.step = _find_in(q, _named(connection, "Step"), min_len=3)
     scope.person = _find_person(q, _named(connection, "HumanUser"))
@@ -232,7 +302,9 @@ def _filters(scope: Scope, entity_type: str) -> tuple[str, list[Any]]:
             "AND l.dst_type='HumanUser' AND l.dst_id=?)"
         )
         params.append(scope.person["id"])
-    if scope.bucket:
+    if scope.bucket == "open":
+        clauses.append(f"LOWER(COALESCE(r.status,'')) NOT IN ({DONE_SQL})")
+    elif scope.bucket:
         codes = sorted(BUCKET_CODES[scope.bucket])
         marks = ",".join("?" * len(codes))
         null_ok = " OR r.status IS NULL" if scope.bucket == "waiting" else ""
@@ -298,7 +370,10 @@ def _stats(connection, scope: Scope, entity_type: str) -> dict[str, Any]:
             params,
         ).fetchone()[0]
         stats["en_retard"] = late
-        for label, dst_type, fld in (("par_etape", "Step", "step"), ("par_personne", "HumanUser", "task_assignees")):
+        groupings = [("par_etape", "Step", "step"), ("par_personne", "HumanUser", "task_assignees")]
+        if not scope.project:
+            groupings.append(("par_production", "Project", "project"))
+        for label, dst_type, fld in groupings:
             grouped = connection.execute(
                 f"""
                 SELECT d.name AS name, COUNT(*) AS n FROM shotgrid_records r
@@ -387,28 +462,36 @@ def retrieve(question: str, limit: int = RECORD_LIMIT) -> dict[str, Any]:
                 return {"scope": f"note {note_id.group(1)}", "stats": None, "records": _rows_to_records([row])}
 
         scope = parse_question(connection, question)
+        ranking = bool(re.search(RANK_RE, q))
+        if scope.counting:
+            limit = min(limit, COUNTING_RECORD_LIMIT)
         mentions_projects = bool(re.search(PROJECTS_RE, q))
 
-        # General question about projects as a collection.
-        if mentions_projects and not scope.structured and scope.entity_type is None:
+        # General question about projects as a collection ("quels sont les projets actifs ?").
+        about_tasks_of_something = any([scope.project, scope.sequence, scope.step, scope.person,
+                                        scope.late, scope.blocked])
+        if mentions_projects and scope.entity_type is None and not about_tasks_of_something:
             rows = connection.execute(
                 "SELECT entity_type, data_json FROM shotgrid_records WHERE entity_type='Project' "
                 "ORDER BY name COLLATE NOCASE"
             ).fetchall()
             records = _rows_to_records(rows)
-            active = sum(1 for r in records if r.get("is_active"))
+            _add_task_counts(connection, records)
+            active = [r for r in records if r.get("is_active")]
+            only_active = bool(re.search(ACTIVE_RE, q)) or scope.bucket in ("open", "in_progress")
             return {
-                "scope": "tous les projets",
-                "stats": {"entity_type": "Project", "total": len(records), "actifs": active,
-                          "non_actifs": len(records) - active},
-                "records": records,
+                "scope": "productions actives" if only_active else "toutes les productions",
+                "stats": {"entity_type": "Project", "total": len(records), "actifs": len(active),
+                          "non_actifs": len(records) - len(active)},
+                "records": active if only_active else records,
             }
 
         # "notes sur le flou": a type plus free words -> full-text search within that type.
         if scope.entity_type and not scope.structured and scope.keywords:
             hits = _fulltext(connection, scope.keywords, limit, scope.entity_type)
             if hits:
-                return {"scope": f"type={scope.entity_type}, mots-clés : " + ", ".join(scope.keywords),
+                return {"scope": f"{TYPE_LABELS.get(scope.entity_type, scope.entity_type)} contenant : "
+                                 + ", ".join(scope.keywords),
                         "stats": None, "records": hits}
 
         if scope.structured or scope.entity_type:
@@ -447,8 +530,16 @@ def retrieve(question: str, limit: int = RECORD_LIMIT) -> dict[str, Any]:
                     if record["entity_type"] == "Task" and record["id"] in blocked:
                         record["blocked_by"] = blocked[record["id"]]
             records = _dedupe([r for r in records if r])
+            if ranking and stats and "taches" not in stats:
+                # Keep only the context records (project/sequence), not the ranked items.
+                records = [r for r in records if r["entity_type"] in ("Project", "Sequence")]
             if records or stats:
-                return {"scope": scope.describe(), "stats": stats, "records": records}
+                for record in records:
+                    if record["entity_type"] == "Project":
+                        _add_task_counts(connection, [record])
+                label = (f"synthèse de la production « {scope.project['name']} »"
+                         if scope.project and not scope.sequence and target is None else scope.describe(target))
+                return {"scope": label, "stats": stats, "records": records}
 
         # Free text.
         records = _fulltext(connection, scope.keywords, limit)
@@ -464,6 +555,35 @@ def retrieve(question: str, limit: int = RECORD_LIMIT) -> dict[str, Any]:
                 "records": _dedupe(records)}
     finally:
         connection.close()
+
+
+def _add_task_counts(connection, projects: list[dict]) -> None:
+    """Attach tasks_total / tasks_open / tasks_late to project records (for the model)."""
+    rows = connection.execute(
+        f"""
+        SELECT project_id, COUNT(*) AS total,
+               SUM(CASE WHEN LOWER(COALESCE(status,'')) NOT IN ({DONE_SQL}) THEN 1 ELSE 0 END) AS open,
+               SUM(CASE WHEN json_extract(data_json,'$.due_date') < date('now')
+                        AND LOWER(COALESCE(status,'')) NOT IN ({DONE_SQL}) THEN 1 ELSE 0 END) AS late
+        FROM shotgrid_records WHERE entity_type='Task' GROUP BY project_id
+        """
+    ).fetchall()
+    by_project = {r["project_id"]: r for r in rows}
+    for project in projects:
+        row = by_project.get(project["id"])
+        project["tasks_total"] = row["total"] if row else 0
+        project["tasks_open"] = row["open"] if row else 0
+        project["tasks_late"] = row["late"] if row else 0
+
+
+def subject_names(question: str) -> list[str]:
+    """Names of the production, sequence and person the question is about (if any)."""
+    connection = database()
+    try:
+        scope = parse_question(connection, question)
+    finally:
+        connection.close()
+    return [x["name"] for x in (scope.project, scope.sequence, scope.person) if x]
 
 
 def connection_project(connection, project_id: int) -> dict:

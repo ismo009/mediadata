@@ -185,6 +185,14 @@ python -m pip install -r requirements-dev.txt
 python -m pytest tests
 ```
 
+### Évaluer l'assistante sur les vraies données
+
+`scripts/eval_assistant.py` pose une série de questions à Lia via l'API en cours d'exécution et vérifie les réponses contre des faits calculés dans la base locale (nombre de productions actives, retards, classements, refus d'inventer…). À relancer après toute modification du prompt (`backend/prompt.py`) ou du format de contexte (`backend/context.py`) :
+
+```bash
+python scripts/eval_assistant.py --model llama3.1:latest
+```
+
 ---
 
 ## 🔌 Référence de l'API REST

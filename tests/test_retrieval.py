@@ -66,10 +66,26 @@ def test_project_snapshot(synced):
     assert result["stats"]["taches"]["en_retard"] == 1
 
 
-def test_general_project_question_lists_all_with_active_count(synced):
+def test_active_projects_question_lists_only_active_ones(synced):
     result = retrieve("Quels sont les projets actifs ?")
-    assert ids(result, "Project") == {1, 2}
-    assert result["stats"]["actifs"] == 1
+    assert ids(result, "Project") == {1}
+    assert result["stats"]["actifs"] == 1 and result["stats"]["non_actifs"] == 1
+    project = result["records"][0]
+    assert (project["tasks_total"], project["tasks_late"]) == (4, 1)
+
+
+def test_general_project_question_lists_all(synced):
+    assert ids(retrieve("Liste des productions"), "Project") == {1, 2}
+
+
+def test_open_tasks_and_per_production_stats(synced):
+    result = retrieve("Qui a le plus de tâches ouvertes ?")
+    assert result["stats"]["total"] == 4  # 100, 101, 103, 104 are not finished
+    assert result["stats"]["par_personne"] == {"Marie Curie": 1}
+    assert ids(result) == set()  # ranking questions are answered from stats only
+    assert ids(retrieve("Quelles tâches sont ouvertes ?")) == {100, 101, 103, 104}
+    late = retrieve("Quelle production a le plus de tâches en retard ?")
+    assert late["stats"]["par_production"] == {"Les Cocottes en Papier": 1}
 
 
 def test_free_text_uses_full_text_index(synced):
@@ -110,3 +126,44 @@ def test_site_specific_statuses_are_bucketed(fake):
     fake.data["Task"][0]["sg_status_list"] = "intapp"  # task 100: internally approved -> done, not late
     sync.sync_shotgrid(mode="full")
     assert ids(retrieve("tâches en retard")) == set()
+
+
+def test_follow_up_inherits_only_the_subject(synced):
+    from backend.assistant import QueryRequest, retrieval_question
+    history = [{"role": "user", "content": "Quelles tâches sont en review sur Les Cocottes en Papier ?"},
+               {"role": "assistant", "content": "1 tâche."}]
+    q = retrieval_question(QueryRequest(question="et combien sont en retard ?", history=history))
+    assert q == "et combien sont en retard ? Les Cocottes en Papier"
+    result = retrieve(q)
+    assert result["stats"]["total"] == 1 and "review" not in result["scope"]
+    # A question that names its own subject is left untouched.
+    own = retrieval_question(QueryRequest(question="Sur quoi travaille Marie ?", history=history))
+    assert own == "Sur quoi travaille Marie ?"
+
+
+def test_context_is_readable_french_text(synced):
+    from backend.context import render_context
+    from datetime import date
+    text = render_context(retrieve("Quelles tâches sont en retard ?"), {"ip": {"name": "In Progress"}}, [],
+                          today=date(2026, 11, 9))
+    assert "CHIFFRES EXACTS" in text
+    assert "Tâche « comp sh020 » — élément : SH020 — étape : Compositing — assignée à : Marie Curie" in text
+    assert "statut : En cours (In Progress)" in text
+    assert "EN RETARD de" in text
+    ranking = render_context(retrieve("Quelle production a le plus de tâches en retard ?"), {}, [])
+    assert "1) Les Cocottes en Papier : 1" in ranking
+    assert "non listés" in ranking
+
+
+@pytest.mark.parametrize("question", [
+    "quelles sont la taches a faire deans le projet des cocottes en pappier",
+    "taches de la production cocottes en papier",
+    "où en est les cocottes en papiers ?",
+])
+def test_production_names_tolerate_typos_and_articles(synced, question):
+    assert "Les Cocottes en Papier" in retrieve(question)["scope"]
+
+
+def test_fuzzy_matching_does_not_invent_a_subject(synced):
+    for question in ("Quels sont les projets actifs ?", "tâches en retard", "combien de notes ?"):
+        assert "production «" not in retrieve(question)["scope"]

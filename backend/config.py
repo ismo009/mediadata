@@ -37,6 +37,8 @@ class Settings:
     app_base_url: str = os.getenv("APP_BASE_URL", "http://localhost:8000")
     ollama_url: str = os.getenv("OLLAMA_URL", "http://localhost:11434").rstrip("/")
     ollama_model: str = os.getenv("OLLAMA_MODEL", "")
+    # Context window requested from Ollama (prompt + data + history + answer).
+    ollama_num_ctx: int = _int_env("OLLAMA_NUM_CTX", 16384)
     shotgrid_url: str = os.getenv("SHOTGRID_SERVER_URL", "").rstrip("/")
     shotgrid_login: str = os.getenv("SHOTGRID_LOGIN", "")
     shotgrid_passphrase: str = os.getenv("SHOTGRID_PASSPHRASE", "")

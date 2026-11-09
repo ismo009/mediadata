@@ -12,8 +12,9 @@ from pydantic import BaseModel, Field
 from backend import config
 from backend.api import status_labels
 from backend.auth import google_access_token
+from backend.context import render_context
 from backend.prompt import SYSTEM_PROMPT
-from backend.retrieval import STOP_WORDS, normalize, retrieve
+from backend.retrieval import STOP_WORDS, normalize, retrieve, subject_names
 
 router = APIRouter()
 
@@ -143,13 +144,45 @@ def _stat_codes(stats: Any) -> list[str]:
     return codes
 
 
+HISTORY_MESSAGES = 6
+HISTORY_ANSWER_CHARS = 700
+
+
+def build_messages(payload: QueryRequest, context: str) -> list[dict[str, str]]:
+    """System prompt, a short conversation history, then DONNÉES + QUESTION.
+
+    Past answers are truncated: they only serve to resolve follow-ups ("et ses tâches ?"),
+    the facts always come from the fresh DONNÉES block.
+    """
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    for msg in payload.history[-HISTORY_MESSAGES:]:
+        role = msg.get("role") if msg.get("role") in ("user", "assistant") else "user"
+        content = str(msg.get("content", ""))
+        if role == "assistant" and len(content) > HISTORY_ANSWER_CHARS:
+            content = content[:HISTORY_ANSWER_CHARS] + "…"
+        messages.append({"role": role, "content": content})
+    messages.append({"role": "user", "content": f"DONNÉES :\n{context}\n\nQUESTION : {payload.question}"})
+    return messages
+
+
+FOLLOW_UP_MAX_WORDS = 10
+
+
 def retrieval_question(payload: QueryRequest) -> str:
-    """Short follow-ups ('et ses tâches ?') inherit the previous user question's context."""
+    """Follow-ups inherit their subject from the conversation.
+
+    "et combien sont en retard ?" after "Où en est Les Cocottes en Papier ?" is searched as
+    "et combien sont en retard ? Les Cocottes en Papier": only the subject (production,
+    sequence, person) is carried over, not the previous filters.
+    """
     question = payload.question.strip()
-    if len(question.split()) <= 4 and payload.history:
-        last = next((m.get("content", "") for m in reversed(payload.history) if m.get("role") == "user"), "")
-        if last:
-            return f"{last} {question}".strip()
+    if not payload.history or len(question.split()) > FOLLOW_UP_MAX_WORDS or subject_names(question):
+        return question
+    for message in reversed(payload.history):
+        if message.get("role") == "user":
+            names = subject_names(str(message.get("content", "")))
+            if names:
+                return f"{question} {' '.join(names)}"
     return question
 
 
@@ -181,15 +214,8 @@ async def query_stream(request: Request, payload: QueryRequest):
             raise HTTPException(status_code=503, detail="Aucun modèle Ollama disponible.")
         model = available[0]
 
-    prompt = (
-        f"SOURCES DONNÉES (JSON COMPACT):\n{json.dumps(sources, ensure_ascii=False, default=str)}\n\n"
-        f"QUESTION UTILISATEUR:\n{payload.question}"
-    )
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-    for msg in payload.history[-6:]:
-        role = msg.get("role") if msg.get("role") in ("user", "assistant") else "user"
-        messages.append({"role": role, "content": str(msg.get("content", ""))})
-    messages.append({"role": "user", "content": prompt})
+    context = render_context(found, labels, drive, long_text=long_text)
+    messages = build_messages(payload, context)
 
     async def event_generator() -> AsyncGenerator[str, None]:
         yield f"data: {json.dumps({'type': 'sources', 'sources': sources}, ensure_ascii=False, default=str)}\n\n"
@@ -198,7 +224,13 @@ async def query_stream(request: Request, payload: QueryRequest):
                 async with client.stream(
                     "POST",
                     f"{config.settings.ollama_url}/api/chat",
-                    json={"model": model, "messages": messages, "stream": True},
+                    json={
+                        "model": model,
+                        "messages": messages,
+                        "stream": True,
+                        # Factual answers: low temperature; context large enough for data + history.
+                        "options": {"temperature": 0.2, "num_ctx": config.settings.ollama_num_ctx},
+                    },
                 ) as response:
                     if response.status_code >= 400:
                         err_text = (await response.aread()).decode(errors="replace")
