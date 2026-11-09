@@ -1,41 +1,112 @@
-# MedIAData — Production Dashboard & Assistant IA
+# MedIAData
 
-Dashboard local haute performance pour la supervision de studios d'animation et VFX, connecté en temps réel à **Autodesk ShotGrid** (Flow Production Tracking), **Ollama** (LLM local en streaming SSE) et, en option, **Google Drive**.
+Tableau de bord local pour suivre des productions d'animation, de VFX et de tournage à partir d'**Autodesk ShotGrid** (Flow Production Tracking), avec **Lia**, une assistante qui répond aux questions en langage naturel grâce à un modèle **Ollama** exécuté sur la machine.
 
-L'application associe un backend **FastAPI + SQLite (indexation relationnelle & recherche plein-texte FTS5)** à une interface réactive développée en **React (Vite)** suivant une direction artistique studio sombre et immersive.
-
----
-
-## 🌟 Fonctionnalités Principales
-
-### 🖥️ Interface
-- **Direction « salle d'étalonnage »** : surfaces gris neutre, la couleur est réservée aux données (statuts, retards). Thème clair et sombre (suit le système, bascule manuelle). Typographie **Archivo** (largeur variable).
-- **Vue d'ensemble** : une « bande de production » par projet (avancement des tâches par statut), triée par retard, activité ou nom, et le fil des dernières notes.
-- **Espace production** : synthèse par étape et par séquence, tâches en retard et bloquées, équipe, puis onglets *Tâches* (filtres étape / personne / statut / retard / bloquées, recherche plein texte, pagination), *Plans* (vignettes fraîches depuis ShotGrid), *Assets*, *Notes*, *Versions*.
-- **Équipe** : charge ouverte, review et retards par personne ; fiche individuelle avec toutes ses tâches.
-- **Synchronisation** : historique, types de données synchronisés et comparaison en direct avec ShotGrid.
-- **Recherche globale** (`Ctrl K`) sur toutes les entités. Lia est un panneau latéral contextuel (connaît la production ouverte). Responsive jusqu'au mobile.
-
-### 🤖 Assistante Lia (RAG)
-- **Périmètre structuré** : la question est analysée (production, séquence, étape — y compris par nom court comme « comp » —, personne, type d'entité, groupe de statut, retard, tâches bloquées par une tâche amont).
-- **Statistiques exactes** : totaux et répartitions (par statut, étape, personne, nombre en retard) calculés en SQL sur toute la base, même quand seule une partie des enregistrements est envoyée au modèle.
-- **Statuts du site** : les codes propres à ShotGrid (`intapp`, `av`, `valide`, `rtk`…) sont regroupés en *Terminé / En review / En cours / En attente* et leurs noms lisibles sont fournis au modèle.
-- Recherche plein texte FTS5 en dernier recours, streaming SSE, sources cliquables.
+L'application garde une copie locale de ShotGrid dans SQLite, synchronisée automatiquement. L'interface et l'assistante lisent cette copie : tout est rapide, et rien n'est jamais modifié dans ShotGrid.
 
 ---
 
-## 🏗️ Architecture Technique
+## Sommaire
+
+1. [Ce que fait l'application](#ce-que-fait-lapplication)
+2. [Lia, l'assistante](#lia-lassistante)
+3. [Architecture](#architecture)
+4. [Installation](#installation)
+5. [Lancement](#lancement)
+6. [Synchronisation avec ShotGrid](#synchronisation-avec-shotgrid)
+7. [Tests et évaluation](#tests-et-évaluation)
+8. [Référence de l'API](#référence-de-lapi)
+9. [Dépannage](#dépannage)
+
+---
+
+## Ce que fait l'application
+
+| Page | Contenu |
+|---|---|
+| **Vue d'ensemble** | Une barre d'avancement par production (tâches terminées, en review, en cours, en attente), triée par retard, activité ou nom. Nombre de tâches en retard et dernières notes. |
+| **Production** | Synthèse par étape et par séquence, tâches en retard, tâches bloquées par une tâche amont, équipe, dernières notes. Onglets *Tâches* (filtres par étape, personne, statut, retard, blocage ; recherche ; pagination), *Plans* (vignettes), *Assets*, *Notes*, *Versions*. |
+| **Équipe** | Charge ouverte, tâches en review et en retard par personne, et fiche individuelle avec toutes ses tâches. |
+| **Synchronisation** | Historique des synchronisations, types de données synchronisés, bouton « Comparer avec ShotGrid » qui vérifie en direct que la copie locale est complète. |
+
+Autres éléments :
+- **Recherche globale** avec `Ctrl K` sur les productions, plans, tâches, notes et personnes.
+- **Lia** s'ouvre dans un panneau latéral et sait quelle production est affichée.
+- **Thème clair ou sombre** (suit le système, bascule manuelle) ; interface utilisable sur mobile.
+- **Direction visuelle** : surfaces gris neutre, comme une salle d'étalonnage ; la couleur est réservée aux données (statuts, retards). Police Archivo.
+
+---
+
+## Lia, l'assistante
+
+### Exemples de questions
+
+- « Où en est Les Cocottes en Papier ? »
+- « Quelles tâches sont en retard sur Devant les Projecteurs ? »
+- « Quelle production a le plus de tâches en retard ? »
+- « Qui a le plus de tâches ouvertes ? »
+- « Combien de tâches de compositing sont en cours ? »
+- « Sur quoi travaille Maxime Pierre ? »
+- « Résume les dernières notes de Un homme de tête »
+- puis, en suite de conversation : « et combien sont en retard ? »
+
+Les fautes de frappe et les noms partiels sont tolérés : « des cocottes en pappier » est reconnu comme *Les Cocottes en Papier*, « stranger thing » comme *Stranger Things - PXFK*.
+
+### Comment une question est traitée
 
 ```text
-   Navigateur (React 18 + Vite)  ──REST / SSE──▶  FastAPI (Uvicorn)
-                                                   ├── ShotGrid (shotgun_api3)
-                                                   ├── Ollama (LLM local)
-                                                   └── Google Drive (optionnel)
-                                                          │
-                          SQLite : enregistrements + liens entre entités + index FTS5
+Question
+  │
+  ├─ 1. Analyse (backend/retrieval.py)
+  │     production, séquence, personne (tolérance aux fautes), étape (« comp » = Compositing),
+  │     type d'élément, état (en attente / en cours / en review / terminé / non terminé),
+  │     retard, blocage, question de comptage ou de classement
+  │
+  ├─ 2. Requêtes SQL sur la copie locale
+  │     → chiffres exacts sur toute la base (total, par état, par étape, par personne, par production)
+  │     → un échantillon d'éléments pertinents (aucun pour un classement)
+  │
+  ├─ 3. Mise en forme (backend/context.py)
+  │     texte français étiqueté : date du jour, statuts traduits, « EN RETARD de 15 jours »,
+  │     chiffres exacts en premier, liste signalée comme PARTIELLE si elle est incomplète
+  │
+  └─ 4. Ollama (backend/prompt.py)
+        prompt court à règles hiérarchisées, température 0,2, réponse en streaming
 ```
 
-### Arborescence du Projet
+Points importants :
+- **Les chiffres viennent de SQL, pas du modèle.** Même si seuls quelques éléments sont envoyés, les totaux et les classements sont calculés sur toute la base.
+- **Lia n'invente pas.** Si l'information n'est pas dans les données, elle répond « Je ne trouve pas cette information dans les données ShotGrid. »
+- **Questions de suite.** Une question courte qui ne nomme ni production, ni séquence, ni personne reprend le sujet de la question précédente (et seulement le sujet, pas les filtres).
+- **Sources.** Sous chaque réponse, l'interface liste les éléments consultés avec leur lien vers ShotGrid.
+
+### Statuts
+
+Les codes de statut ShotGrid, y compris ceux propres au site, sont regroupés en quatre états affichés partout dans l'interface et donnés à Lia :
+
+| État | Codes |
+|---|---|
+| Terminé | `fin`, `apr`, `cmpt`, `clsd`, `na`, `omt`, `dlvr`, `vwd`, `res`, `cfrm`, `recd`, `valide`, `cliapp`, `intapp` |
+| En review | `rev`, `av` (A valider), `rsb`, `pub` |
+| En cours | `ip`, `act`, `wip`, `ren`, `rtk` (retake), `tr` (Tout roule) |
+| En attente | `wtg`, `rdy`, `rdysta`, `hld`, `opn`, `pndng`, statut vide |
+
+Une tâche est **en retard** si son échéance est dépassée et qu'elle n'est pas terminée. Elle est **bloquée** si l'une de ses tâches amont n'est pas terminée.
+
+Une production est **active** si elle n'est ni archivée, ni un template, et que son statut n'est pas *Done*, *Lost* ou *Bidding*. Le même calcul sert au tableau de bord et à Lia.
+
+---
+
+## Architecture
+
+```text
+Navigateur (React 18 + Vite) ──REST / SSE──▶ FastAPI (Uvicorn)
+                                              ├── ShotGrid (shotgun_api3) ─ synchronisation, vignettes
+                                              ├── Ollama ───────────────── réponses de Lia
+                                              └── Google Drive (optionnel)
+                                                     │
+                     SQLite : enregistrements + liens entre entités + index plein texte FTS5
+```
 
 ```text
 html_server/
@@ -43,57 +114,59 @@ html_server/
 ├── .env.example
 ├── dashboard.sqlite3          # copie locale de ShotGrid (non versionnée)
 ├── backend/
-│   ├── main.py                # assemblage de l'app FastAPI, planificateur
+│   ├── main.py                # assemblage de l'application, planificateur de synchronisation
 │   ├── config.py              # variables d'environnement
-│   ├── db.py                  # schéma SQLite versionné et migrations
-│   ├── records.py             # noms, statuts, projets actifs, retards
+│   ├── db.py                  # schéma SQLite versionné, migrations automatiques
+│   ├── records.py             # noms, statuts, productions actives, retards
 │   ├── shotgrid.py            # client ShotGrid
-│   ├── sync.py                # synchro complète / incrémentale, audit
-│   ├── retrieval.py           # question → périmètre, enregistrements, stats
-│   ├── assistant.py           # endpoint de l'assistante (streaming)
+│   ├── sync.py                # synchronisation complète / incrémentale, audit
+│   ├── retrieval.py           # question → périmètre, éléments, chiffres exacts
+│   ├── context.py             # mise en forme des données pour le modèle
 │   ├── prompt.py              # prompt système de Lia
+│   ├── assistant.py           # endpoint de l'assistante (streaming)
 │   ├── auth.py                # Google OAuth (jetons stockés côté serveur)
 │   ├── api.py                 # API de lecture pour l'interface
 │   └── migrate_db.py          # migration / reconstruction manuelle
-├── tests/                     # pytest (faux client ShotGrid)
+├── scripts/
+│   └── eval_assistant.py      # évaluation de Lia sur les vraies données
+├── tests/                     # pytest, avec un faux client ShotGrid
 └── frontend/src/
-    ├── App.jsx                # coquille, routage, thème, synchro
+    ├── App.jsx                # structure, routage, thème, état de la synchronisation
     ├── api.js / lib.js        # client HTTP, routeur, formatage
     ├── index.css              # système visuel
     ├── pages/                 # Overview, ProjectPage, PeoplePage, PersonPage, SyncPage
     └── components/            # ui, TaskTable, SearchPalette, Assistant
 ```
 
----
+### Tables SQLite
 
-## 📋 Prérequis
-
-- **macOS**, **Linux** ou **Windows**
-- **Python 3.9+**
-- **Node.js 18+** & **npm**
-- **Ollama** lancé localement avec au moins un modèle installé (ex: `llama3.1`, `mistral`)
-- Un compte ou accès script sur un site **Autodesk ShotGrid**
-
-Vérifiez vos versions :
-```bash
-python3 --version
-node -v
-npm -v
-ollama list
-```
+| Table | Contenu |
+|---|---|
+| `shotgrid_records` | Un enregistrement ShotGrid par ligne (JSON complet + colonnes indexées : type, id, nom, production, statut) |
+| `shotgrid_links` | Chaque lien entre entités : tâche → étape, plan → séquence, tâche → personnes assignées, tâche → tâches amont… |
+| `shotgrid_fts` | Index plein texte (FTS5) des noms, descriptions et contenus de notes |
+| `entity_types` | Types synchronisés, nom lisible, nombre d'enregistrements, dates de synchronisation |
+| `sync_runs` | Historique des synchronisations |
+| `user_tokens` | Jetons Google OAuth (jamais stockés dans le cookie) |
 
 ---
 
-## ⚙️ Installation & Configuration
+## Installation
 
-### 1. Installation des dépendances Python
+### Prérequis
+
+- **Python 3.10 ou plus récent**
+- **Node.js 18+** et **npm**
+- **Ollama** avec au moins un modèle de discussion téléchargé (testé avec `llama3.1:latest`)
+- Un accès à un site **Autodesk ShotGrid** (identifiant ou clé de script)
+
+### 1. Dépendances Python
 
 ```bash
-cd /Users/lolot/html_server
-python3 -m pip install -r requirements.txt
+python -m pip install -r requirements.txt
 ```
 
-### 2. Installation et compilation du Frontend React
+### 2. Interface
 
 ```bash
 cd frontend
@@ -102,137 +175,160 @@ npm run build
 cd ..
 ```
 
-### 3. Configuration des variables d'environnement (`.env`)
+### 3. Modèle Ollama
 
-Copiez le fichier d'exemple :
+```bash
+ollama pull llama3.1
+```
+
+### 4. Configuration (`.env`)
+
 ```bash
 cp .env.example .env
 ```
 
-Éditez `.env` avec vos identifiants :
-```env
-APP_SECRET=votre-cle-secrete-aleatoire-et-longue
-APP_BASE_URL=http://localhost:8000
+| Variable | Rôle | Par défaut |
+|---|---|---|
+| `SHOTGRID_SERVER_URL` | Adresse du site ShotGrid | — |
+| `SHOTGRID_LOGIN` / `SHOTGRID_PASSPHRASE` | Connexion par identifiant | — |
+| `SHOTGRID_SCRIPT_NAME` / `SHOTGRID_SCRIPT_KEY` | Ou connexion par clé de script | — |
+| `OLLAMA_URL` | Adresse d'Ollama | `http://localhost:11434` |
+| `OLLAMA_MODEL` | Modèle utilisé par défaut (modifiable dans le panneau de Lia) | premier modèle trouvé |
+| `OLLAMA_NUM_CTX` | Taille de contexte demandée à Ollama | `16384` |
+| `SYNC_ENTITIES` | `auto` (tous les types utiles) ou une liste : `Project,Shot,Task` | `auto` |
+| `SYNC_INTERVAL_MINUTES` | Intervalle de la synchronisation automatique (`0` la désactive) | `30` |
+| `FULL_SYNC_EVERY_HOURS` | Fréquence de la synchronisation complète | `24` |
+| `APP_SECRET` | Clé de signature des sessions. Sans elle, une clé aléatoire est générée et les sessions sont perdues à chaque redémarrage. | aléatoire |
+| `APP_BASE_URL` | Adresse publique de l'application | `http://localhost:8000` |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_REDIRECT_URI` | Optionnel : recherche de fichiers Google Drive par Lia | — |
+| `DATABASE_PATH` | Emplacement de la base SQLite | `dashboard.sqlite3` |
 
-# Configuration Ollama
-OLLAMA_URL=http://localhost:11434
-OLLAMA_MODEL=llama3.1:latest
-
-# Autodesk ShotGrid (Authentification utilisateur ou script)
-SHOTGRID_SERVER_URL=https://votre-site.shotgrid.autodesk.com
-SHOTGRID_LOGIN=votre_identifiant
-SHOTGRID_PASSPHRASE=votre_passphrase
-SHOTGRID_PAT=votre_personal_access_token
-
-# Ou via Script Key :
-# SHOTGRID_SCRIPT_NAME=mon_script
-# SHOTGRID_SCRIPT_KEY=ma_cle_api
-
-# Google Drive (Optionnel)
-# GOOGLE_ACCESS_TOKEN=token_optionnel
-```
-
-> 🔒 **Sécurité** : Le fichier `.env` et la base `dashboard.sqlite3` sont exclus de Git. Ne partagez jamais vos clés API ou tokens.
+Le fichier `.env` et la base `dashboard.sqlite3` sont exclus de Git : ne les partagez pas.
 
 ---
 
-## 🚀 Lancement de l'Application
-
-### Mode Standard / Production (Recommandé)
-FastAPI sert directement l'interface React compilée :
+## Lancement
 
 ```bash
-python3 -m uvicorn backend.main:app --reload --port 8000
+python -m uvicorn backend.main:app --port 8000
 ```
 
-Ouvrez votre navigateur sur :
-👉 **`http://localhost:8000`**
+Puis ouvrez **http://localhost:8000**. FastAPI sert l'interface compilée. Une première synchronisation démarre automatiquement après quelques secondes.
 
-### Mode Développement Frontend (Hot-Reload)
-Pour travailler sur les composants React avec rechargement instantané :
+### Développement de l'interface (rechargement à chaud)
 
-1. **Terminal 1 (Backend FastAPI)** :
-   ```bash
-   python3 -m uvicorn backend.main:app --reload --port 8000
-   ```
-2. **Terminal 2 (Serveur Vite)** :
-   ```bash
-   cd frontend
-   npm run dev
-   ```
-   👉 Ouvrez **`http://localhost:5173`** *(les requêtes `/api` et `/auth` sont automatiquement redirigées vers FastAPI)*.
+Dans un premier terminal :
+
+```bash
+python -m uvicorn backend.main:app --reload --port 8000
+```
+
+Dans un second :
+
+```bash
+cd frontend
+npm run dev
+```
+
+Ouvrez **http://localhost:5173** : les appels `/api` et `/auth` sont redirigés vers FastAPI.
 
 ---
 
-## 🔄 Synchronisation ShotGrid & Base SQLite
+## Synchronisation avec ShotGrid
 
-- **Automatique** : au démarrage puis toutes les `SYNC_INTERVAL_MINUTES` (30 par défaut), une synchronisation *incrémentale* récupère les enregistrements modifiés (`updated_at`) et applique les suppressions lues dans le journal d'événements ShotGrid. Une synchronisation *complète* a lieu si la dernière date de plus de `FULL_SYNC_EVERY_HOURS` (24 par défaut).
-- **Manuelle** : bouton de synchronisation en haut de l'écran, ou page *Synchronisation* (incrémentale, complète, comparaison avec ShotGrid).
-- **Types synchronisés** : avec `SYNC_ENTITIES=auto`, tous les types ShotGrid non système qui contiennent des données (tâches, plans, séquences, étapes, notes, réponses, versions, playlists, temps saisis, fichiers, entités personnalisées…). Ou une liste explicite : `SYNC_ENTITIES=Project,Shot,Task`.
-- Chaque lien entre entités (tâche → étape, plan → séquence, tâche → tâches amont…) est indexé dans `shotgrid_links`.
+- **Automatique** : au démarrage, puis toutes les `SYNC_INTERVAL_MINUTES`. La synchronisation est *incrémentale* : elle récupère les enregistrements modifiés depuis la dernière fois (`updated_at`) et applique les suppressions lues dans le journal d'événements ShotGrid. Une synchronisation *complète* a lieu quand la dernière date de plus de `FULL_SYNC_EVERY_HOURS`.
+- **Manuelle** : bouton en haut de l'écran, ou page *Synchronisation* (« Synchroniser les changements », « Synchronisation complète »).
+- **Types synchronisés** : avec `SYNC_ENTITIES=auto`, tous les types ShotGrid qui contiennent des données, sauf les types techniques (journaux, pages, permissions…). Cela inclut tâches, plans, séquences, étapes, assets, versions, notes et réponses, playlists, temps saisis, fichiers, dépendances et les entités personnalisées du site.
+- **Fiabilité** : chaque type est enregistré en une seule transaction ; les enregistrements supprimés dans ShotGrid sont retirés ; une réponse vide de ShotGrid n'efface jamais la copie locale ; une synchronisation interrompue ne bloque pas les suivantes.
+- **Vérification** : « Comparer avec ShotGrid » (page *Synchronisation*) ou `GET /api/sync/audit` compare chaque type, enregistrement par enregistrement, et signale les écarts.
 
-Le schéma se met à jour tout seul. Pour reconstruire à la main l'index plein texte et les liens :
+Le schéma de la base se met à jour tout seul au démarrage. Pour reconstruire à la main l'index plein texte et les liens :
+
 ```bash
 python -m backend.migrate_db --rebuild
 ```
 
 ---
 
-## 🧪 Tests
+## Tests et évaluation
+
+### Tests unitaires
 
 ```bash
 python -m pip install -r requirements-dev.txt
 python -m pytest tests
 ```
 
-### Évaluer l'assistante sur les vraies données
+Ils couvrent la synchronisation (complète, incrémentale, suppressions, migration), l'analyse des questions, la mise en forme du contexte et l'API, avec un faux client ShotGrid. Ils ne nécessitent ni ShotGrid ni Ollama.
 
-`scripts/eval_assistant.py` pose une série de questions à Lia via l'API en cours d'exécution et vérifie les réponses contre des faits calculés dans la base locale (nombre de productions actives, retards, classements, refus d'inventer…). À relancer après toute modification du prompt (`backend/prompt.py`) ou du format de contexte (`backend/context.py`) :
+### Évaluation de Lia sur les vraies données
+
+`scripts/eval_assistant.py` pose une série de questions à Lia via le serveur en cours d'exécution. Il vérifie chaque réponse contre des faits calculés dans la base locale : nombre de productions actives, tâches en retard, classements, questions de suite, noms avec fautes de frappe, refus d'inventer un budget ou un réalisateur.
 
 ```bash
 python scripts/eval_assistant.py --model llama3.1:latest
+python scripts/eval_assistant.py --only 2,8,13   # seulement certaines questions
 ```
+
+Relancez-le après toute modification du prompt (`backend/prompt.py`), de la mise en forme (`backend/context.py`) ou de l'analyse des questions (`backend/retrieval.py`). Avec `llama3.1:latest`, l'ancien prompt obtenait 6/10 ; la version actuelle a obtenu 13/13 sur une exécution complète.
 
 ---
 
-## 🔌 Référence de l'API REST
+## Référence de l'API
 
 | Méthode | Route | Description |
 |---|---|---|
-| `GET` | `/api/dashboard` | Projets avec avancement, retards, activité ; totaux ; dernières notes |
-| `GET` | `/api/projects/{id}` | Synthèse d'une production (étapes, séquences, retards, blocages, équipe) |
+| `GET` | `/api/dashboard` | Productions avec avancement, retards et activité ; totaux ; dernières notes |
+| `GET` | `/api/projects/{id}` | Synthèse d'une production : étapes, séquences, retards, blocages, équipe |
 | `GET` | `/api/records/{EntityType}` | Liste filtrée : `project_id`, `sequence_id`, `step_id`, `person_id`, `bucket`, `late`, `blocked`, `search`, `sort`, `page`, `limit` |
 | `GET` | `/api/people`, `/api/people/{id}` | Charge par personne, tâches d'une personne |
 | `GET` | `/api/search?q=` | Recherche plein texte globale |
-| `GET` | `/api/thumbnails?entity_type=&ids=` | URLs de vignettes fraîches (les URLs ShotGrid expirent) |
+| `GET` | `/api/thumbnails?entity_type=&ids=` | Liens de vignettes à jour (ceux de ShotGrid expirent) |
 | `GET` | `/api/statuses`, `/api/entity-types` | Noms des statuts, types synchronisés |
 | `POST` | `/api/sync?mode=auto\|full\|incremental` | Lance une synchronisation |
-| `GET` | `/api/sync/status`, `/api/sync/runs` | Dernière synchro, historique |
+| `GET` | `/api/sync/status`, `/api/sync/runs` | Dernière synchronisation, historique |
 | `GET` | `/api/sync/audit?include_unsynced=true` | Comparaison en direct ShotGrid ↔ copie locale |
 | `GET` | `/api/models` | Modèles Ollama disponibles |
-| `POST` | `/api/query/stream` | Assistante Lia en streaming SSE |
-| `GET` | `/auth/google/login`, `/auth/google/callback`; `POST /auth/logout`; `GET /api/me` | Google OAuth |
+| `POST` | `/api/query/stream` | Lia, réponse en streaming (SSE) |
+| `GET` | `/auth/google/login`, `/auth/google/callback` | Connexion Google (optionnelle) |
+| `POST` | `/auth/logout` | Déconnexion |
+| `GET` | `/api/me` | Session en cours |
 
 ---
 
-## 🛠️ Dépannage Fréquent
+## Dépannage
 
-### `uvicorn: command not found`
-Utilisez la commande via le module Python :
-```bash
-python3 -m uvicorn backend.main:app --reload --port 8000
-```
-*(Pour créer un raccourci direct, ajoutez `export PATH="$HOME/Library/Python/3.9/bin:$PATH"` dans votre `~/.zshrc`)*.
-
-### `Ollama est indisponible`
-Vérifiez qu'Ollama est bien lancé sur votre machine :
+**Lia répond « Ollama est injoignable »**
+Ollama n'est pas lancé. Démarrez-le, puis vérifiez :
 ```bash
 curl http://localhost:11434/api/tags
 ```
 
-### L'interface ne prend pas en compte les dernières modifications
-Recompilez les assets React :
+**Lia répond « … does not support chat »**
+Le modèle est mal installé : il apparaît dans la liste mais ses fichiers sont incomplets. Retéléchargez-le, puis testez :
+```bash
+ollama pull llama3.1
+```
+```bash
+ollama run llama3.1 "Réponds juste : ok"
+```
+En attendant, choisissez un autre modèle dans le menu du panneau de Lia.
+
+**Une production n'est pas reconnue par Lia**
+Utilisez au moins deux mots de son nom (« cocottes en papier »). Les noms trop courts ou trop génériques (« test », « 1 ») ne sont reconnus que s'ils sont écrits exactement.
+
+**`uvicorn` introuvable, ou `ModuleNotFoundError: fastapi`**
+Lancez le serveur avec le même Python que celui qui a installé les dépendances : `python -m uvicorn …`. Sous Windows, si plusieurs Python sont installés, vérifiez lequel est utilisé avec `python -c "import sys; print(sys.executable)"`.
+
+**Erreurs SQLite après une mise à jour**
+Arrêtez tout ancien serveur encore lancé : une ancienne version du code n'est pas compatible avec le nouveau schéma. Redémarrez ensuite le serveur, qui migre la base automatiquement.
+
+**Vous êtes déconnecté de Google à chaque redémarrage**
+Définissez `APP_SECRET` dans `.env`.
+
+**L'interface ne reflète pas les dernières modifications**
+Recompilez l'interface :
 ```bash
 cd frontend && npm run build
 ```
-Puis faites un rafraîchissement complet dans le navigateur avec `Cmd + Shift + R`.
+Puis rechargez la page sans cache (`Ctrl + Shift + R`).
