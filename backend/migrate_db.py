@@ -125,3 +125,4 @@ def migrate(db_path: Path = DB_PATH):
 
 if __name__ == "__main__":
     migrate()
+

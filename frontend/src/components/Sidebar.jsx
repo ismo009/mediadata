@@ -2,11 +2,6 @@ import React from "react";
 import {
   LayoutDashboard,
   FolderKanban,
-  Film,
-  CheckSquare,
-  Box,
-  Layers,
-  FileText,
   RefreshCw,
   Sparkles,
   ChevronRight,
@@ -14,12 +9,7 @@ import {
 
 const NAV_ITEMS = [
   { id: "overview", label: "Vue d'ensemble", icon: LayoutDashboard },
-  { id: "projects", label: "Projets", icon: FolderKanban, entity: "projects" },
-  { id: "shots", label: "Shots", icon: Film, entity: "shots" },
-  { id: "tasks", label: "Tâches", icon: CheckSquare, entity: "tasks" },
-  { id: "assets", label: "Assets", icon: Box, entity: "assets" },
-  { id: "versions", label: "Versions", icon: Layers, entity: "versions" },
-  { id: "notes", label: "Notes", icon: FileText, entity: "notes" },
+  { id: "projects", label: "Projets", icon: FolderKanban },
 ];
 
 export default function Sidebar({
@@ -39,7 +29,7 @@ export default function Sidebar({
           <span style={styles.logoText}>SO</span>
         </div>
         <div style={{ display: "flex", flexDirection: "column" }}>
-          <h1 style={styles.brandTitle}>Studio Ops</h1>
+          <h1 style={styles.brandTitle}>MedIAData</h1>
           <span style={styles.brandSubtitle}>Production Hub</span>
         </div>
       </div>

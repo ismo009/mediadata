@@ -86,13 +86,9 @@ export default function ProjectDetail({ projectId, onBack }) {
         <div style={styles.heroInfo}>
           <div style={styles.heroBadgesRow}>
             <span
-              className={`badge ${
-                project.sg_status === "Active" || project.sg_status === "act"
-                  ? "badge-active"
-                  : "badge-default"
-              }`}
+              className={`badge ${project.is_active ? "badge-active" : "badge-default"}`}
             >
-              {project.sg_status || "Sans statut"}
+              {project.status_label || "Sans statut"}
             </span>
             <div style={styles.idChip}>
               <Hash size={12} color="var(--text-sub)" />

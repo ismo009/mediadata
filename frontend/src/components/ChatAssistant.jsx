@@ -27,7 +27,7 @@ export default function ChatAssistant({ isOpen, onClose }) {
     {
       role: "assistant",
       content:
-        "Bonjour ! Je suis l'assistant Studio Ops. Posez-moi une question sur vos projets ShotGrid ou vos documents Google Drive.",
+        "Bonjour ! Je suis l'assistant MedIAData. Posez-moi une question sur vos projets ShotGrid ou vos documents Google Drive.",
       sources: null,
     },
   ]);

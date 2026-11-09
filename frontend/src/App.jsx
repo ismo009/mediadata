@@ -2,23 +2,12 @@ import React, { useState, useEffect } from "react";
 import Sidebar from "./components/Sidebar";
 import DashboardOverview from "./components/DashboardOverview";
 import ProjectDetail from "./components/ProjectDetail";
-import EntityTable from "./components/EntityTable";
 import ChatAssistant from "./components/ChatAssistant";
 import { fetchDashboard, triggerSync, fetchSyncStatus } from "./api";
 import { Sparkles, Clock } from "lucide-react";
 
-const ENTITY_TITLES = {
-  projects: "Projets",
-  shots: "Shots (Plans)",
-  tasks: "Tâches de production",
-  assets: "Assets (Ressources)",
-  versions: "Versions de review",
-  notes: "Notes de production",
-};
-
 export default function App() {
   const [activeTab, setActiveTab] = useState("overview");
-  const [currentEntity, setCurrentEntity] = useState(null);
   const [selectedProjectId, setSelectedProjectId] = useState(null);
 
   const [dashboardData, setDashboardData] = useState(null);
@@ -45,7 +34,6 @@ export default function App() {
   const handleSelectTab = (tabId, entity) => {
     setActiveTab(tabId);
     setSelectedProjectId(null);
-    setCurrentEntity(entity || null);
   };
 
   // Handle Project Selection from Overview
@@ -102,7 +90,7 @@ export default function App() {
                 ? "Espace Projet"
                 : activeTab === "overview"
                 ? "Vue d'ensemble de la production"
-                : ENTITY_TITLES[currentEntity] || "Gestion"}
+                : "Projets"}
             </h2>
           </div>
 
@@ -145,10 +133,10 @@ export default function App() {
               onSelectProject={handleSelectProject}
             />
           ) : (
-            <EntityTable
-              key={currentEntity}
-              entity={currentEntity}
-              entityTitle={ENTITY_TITLES[currentEntity] || currentEntity}
+            <DashboardOverview
+              dashboardData={dashboardData}
+              onSelectProject={handleSelectProject}
+              showKpis={false}
             />
           )}
         </div>

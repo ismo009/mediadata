@@ -11,7 +11,7 @@ import {
   TrendingUp,
 } from "lucide-react";
 
-export default function DashboardOverview({ dashboardData, onSelectProject }) {
+export default function DashboardOverview({ dashboardData, onSelectProject, showKpis = true }) {
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
 
@@ -21,7 +21,7 @@ export default function DashboardOverview({ dashboardData, onSelectProject }) {
     const matchesSearch =
       (p.name || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
       (p.code || "").toLowerCase().includes(searchTerm.toLowerCase());
-    const isActive = p.sg_status === "Active" || p.sg_status === "act";
+    const isActive = Boolean(p.is_active);
 
     if (statusFilter === "active") return matchesSearch && isActive;
     if (statusFilter === "other") return matchesSearch && !isActive;
@@ -47,7 +47,7 @@ export default function DashboardOverview({ dashboardData, onSelectProject }) {
   return (
     <div style={styles.container}>
       {/* KPI Section */}
-      <div style={styles.kpiGrid}>
+      {showKpis && <div style={styles.kpiGrid}>
         <div style={styles.kpiCard}>
           <div style={styles.kpiTopRow}>
             <div style={{ ...styles.kpiIconWrap, background: "rgba(99, 102, 241, 0.12)" }}>
@@ -117,12 +117,14 @@ export default function DashboardOverview({ dashboardData, onSelectProject }) {
             </div>
           </div>
         </div>
-      </div>
+      </div>}
 
       {/* Main Section Header */}
       <div style={styles.sectionHeader}>
         <div>
-          <h2 style={styles.sectionTitle}>Catalogue des Projets</h2>
+          <h2 style={styles.sectionTitle}>
+            {showKpis ? "Catalogue des Projets" : "Tous les Projets"}
+          </h2>
           <p style={styles.sectionSubtitle}>
             Sélectionnez un projet pour consulter ses dépendances, tâches et retours artistiques.
           </p>
@@ -166,7 +168,7 @@ export default function DashboardOverview({ dashboardData, onSelectProject }) {
       {/* Projects Grid */}
       <div style={styles.projectGrid}>
         {filteredProjects.map((p) => {
-          const isActive = p.sg_status === "Active" || p.sg_status === "act";
+          const isActive = Boolean(p.is_active);
           const initial = (p.name || "P").charAt(0).toUpperCase();
           const avatarGradient = getGradientForProject(p.name || "");
 
@@ -182,7 +184,7 @@ export default function DashboardOverview({ dashboardData, onSelectProject }) {
                 </div>
                 <div style={styles.headerRight}>
                   <span className={`badge ${isActive ? "badge-active" : "badge-default"}`}>
-                    {p.sg_status || "Sans statut"}
+                    {p.status_label || "Sans statut"}
                   </span>
                   {p.source_url && (
                     <a

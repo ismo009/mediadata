@@ -1,4 +1,4 @@
-# Studio Ops — Production Dashboard & Assistant IA
+# MedIAData — Production Dashboard & Assistant IA
 
 Dashboard local haute performance pour la supervision de studios d'animation et VFX, connecté en temps réel à **Autodesk ShotGrid** (Flow Production Tracking), **Ollama** (LLM local en streaming SSE) et, en option, **Google Drive**.
 

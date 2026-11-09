@@ -3,8 +3,9 @@ import json
 import os
 import re
 import sqlite3
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, AsyncGenerator, Optional
 
@@ -64,7 +65,20 @@ class Settings:
 
 
 settings = Settings()
-app = FastAPI(title="Studio Ops Dashboard API")
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    # A sync cannot survive a server restart, so any run still "running" is dead.
+    connection = database()
+    try:
+        fail_stale_sync_runs(connection, older_than=None)
+    finally:
+        connection.close()
+    yield
+
+
+app = FastAPI(title="MedIAData Dashboard API", lifespan=lifespan)
 
 app.add_middleware(
     SessionMiddleware,
@@ -171,11 +185,43 @@ def shotgrid_client():
     raise HTTPException(status_code=503, detail="Identifiants ShotGrid non configurés")
 
 
+# Project sg_status values (lower-cased) that mean the project is no longer in production.
+INACTIVE_PROJECT_STATUSES = {"done", "lost", "bidding"}
+PROJECT_STATUS_LABELS = {
+    "active": "Actif",
+    "act": "Actif",
+    "bidding": "Appel d'offres",
+    "demo/test": "Démo / Test",
+    "lost": "Perdu",
+    "done": "Terminé",
+}
+
+
+def project_state(record: dict[str, Any]) -> tuple[str, bool]:
+    """Single source of truth for a project's status label and whether it counts as active.
+
+    Mirrors ShotGrid's own "Active Projects" notion: archived projects and templates are
+    never active; otherwise the optional sg_status field decides, and an empty sg_status
+    (the norm on this site) means the project is active.
+    """
+    if record.get("archived"):
+        return "Archivé", False
+    if record.get("is_template"):
+        return "Template", False
+    raw = (record.get("sg_status") or "").strip()
+    if not raw:
+        return "Actif", True
+    key = raw.casefold()
+    return PROJECT_STATUS_LABELS.get(key, raw), key not in INACTIVE_PROJECT_STATUSES
+
+
 def with_source_url(record: dict[str, Any], entity_type=None) -> dict[str, Any]:
     result = dict(record)
     record_type = entity_type or result.get("type")
     if record_type and result.get("id") and settings.shotgrid_url:
         result["source_url"] = f"{settings.shotgrid_url}/detail/{record_type}/{result['id']}"
+    if record_type == "Project":
+        result["status_label"], result["is_active"] = project_state(result)
     return result
 
 
@@ -428,21 +474,7 @@ def compact_record_for_llm(record: dict[str, Any], entity_type: str) -> dict[str
     }
 
     if entity_type == "Project":
-        sg_st = record.get("sg_status")
-        is_archived = record.get("archived", False)
-        is_tmpl = record.get("is_template", False)
-        is_demo = record.get("is_demo", False)
-
-        if is_archived:
-            compact["status"] = "Archivé"
-        elif is_tmpl:
-            compact["status"] = "Template"
-        elif is_demo:
-            compact["status"] = "Démo (Actif)"
-        elif sg_st == "Active":
-            compact["status"] = "Actif"
-        else:
-            compact["status"] = "Actif / En production"
+        compact["status"], compact["is_active"] = project_state(record)
 
         if record.get("start_date"):
             compact["start_date"] = record["start_date"]
@@ -478,111 +510,258 @@ def compact_record_for_llm(record: dict[str, Any], entity_type: str) -> dict[str
     return compact
 
 
-def sync_shotgrid() -> dict[str, Any]:
-    client = shotgrid_client()
-    started = datetime.now(timezone.utc).isoformat()
-    connection = database()
-    run = connection.execute(
-        "INSERT INTO sync_runs (started_at, status) VALUES (?, ?)",
-        (started, "running"),
+SYNC_PAGE_SIZE = 500
+# A run still marked "running" after this long is considered dead (server crash/restart).
+SYNC_STALE_AFTER = timedelta(minutes=30)
+FTS_CONTENT_FIELDS = ("subject", "content", "sg_description", "description", "code")
+
+
+def utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def fetch_all_records(client, entity_type: str, fields: list[str]) -> list[dict[str, Any]]:
+    """Fetch every record of a type, paging in a stable order so no record is skipped."""
+    records: list[dict[str, Any]] = []
+    page = 1
+    while True:
+        batch = client.find(
+            entity_type,
+            [],
+            fields,
+            order=[{"field_name": "id", "direction": "asc"}],
+            limit=SYNC_PAGE_SIZE,
+            page=page,
+        )
+        records.extend(batch)
+        if len(batch) < SYNC_PAGE_SIZE:
+            return records
+        page += 1
+
+
+def record_rows(entity_type: str, record: dict[str, Any], now: str) -> tuple[tuple, tuple]:
+    """Build the (shotgrid_records row, shotgrid_fts row) for one ShotGrid record."""
+    name = record.get("name") or record.get("code") or record.get("cached_display_name")
+    status = record.get("sg_status") or record.get("sg_status_list")
+    if entity_type == "Project":
+        project_id = record["id"]
+    else:
+        proj = record.get("project")
+        project_id = proj["id"] if isinstance(proj, dict) and "id" in proj else None
+
+    content = " ".join(str(record[k]) for k in FTS_CONTENT_FIELDS if record.get(k))
+    return (
+        (entity_type, record["id"], name, project_id, status, json.dumps(record, default=str), now),
+        (entity_type, record["id"], project_id, name or "", content),
     )
-    run_id = run.lastrowid
+
+
+def store_entity_records(
+    connection: sqlite3.Connection, entity_type: str, records: list[dict[str, Any]]
+) -> dict[str, int]:
+    """Replace the local copy of one entity type with `records`, in a single transaction.
+
+    Upserts every record, rebuilds that type's full-text rows (so they never duplicate),
+    and removes records that no longer exist in ShotGrid.
+    """
+    now = utc_now()
+    pairs = [record_rows(entity_type, r, now) for r in records]
+    live_ids = {r["id"] for r in records}
+    local_ids = {
+        row[0]
+        for row in connection.execute(
+            "SELECT entity_id FROM shotgrid_records WHERE entity_type=?", (entity_type,)
+        )
+    }
+    # Safety net: an empty answer while we hold data is far more likely a permission or
+    # API problem than a real mass deletion, so keep the local copy in that case.
+    stale_ids = sorted(local_ids - live_ids) if live_ids else []
+
+    with connection:
+        connection.executemany(
+            """
+            INSERT INTO shotgrid_records
+                (entity_type, entity_id, name, project_id, status, data_json, synced_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(entity_type, entity_id) DO UPDATE SET
+                name=excluded.name,
+                project_id=excluded.project_id,
+                status=excluded.status,
+                data_json=excluded.data_json,
+                synced_at=excluded.synced_at
+            """,
+            [record_row for record_row, _ in pairs],
+        )
+        connection.executemany(
+            "DELETE FROM shotgrid_records WHERE entity_type=? AND entity_id=?",
+            [(entity_type, entity_id) for entity_id in stale_ids],
+        )
+        if live_ids:
+            connection.execute("DELETE FROM shotgrid_fts WHERE entity_type=?", (entity_type,))
+            connection.executemany(
+                """
+                INSERT INTO shotgrid_fts (entity_type, entity_id, project_id, name, content)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                [fts_row for _, fts_row in pairs],
+            )
+    return {"upserted": len(records), "deleted": len(stale_ids)}
+
+
+def fail_stale_sync_runs(connection: sqlite3.Connection, older_than: Optional[timedelta]) -> int:
+    """Mark leftover 'running' sync runs as failed so they stop blocking new syncs.
+
+    `older_than=None` fails every running run (used at startup, when none can be alive).
+    """
+    params: list[Any] = [utc_now(), "Synchronisation interrompue (serveur arrêté ou bloqué)"]
+    where = "status='running'"
+    if older_than is not None:
+        where += " AND started_at < ?"
+        params.append((datetime.now(timezone.utc) - older_than).isoformat())
+    with connection:
+        cursor = connection.execute(
+            f"UPDATE sync_runs SET status='failed', finished_at=?, error=? WHERE {where}",
+            params,
+        )
+    return cursor.rowcount
+
+
+def start_sync_run(connection: sqlite3.Connection) -> Optional[int]:
+    """Create a 'running' sync run, or return None if another one is genuinely in progress."""
+    fail_stale_sync_runs(connection, SYNC_STALE_AFTER)
+    with connection:
+        if connection.execute("SELECT 1 FROM sync_runs WHERE status='running' LIMIT 1").fetchone():
+            return None
+        return connection.execute(
+            "INSERT INTO sync_runs (started_at, status) VALUES (?, 'running')", (utc_now(),)
+        ).lastrowid
+
+
+def sync_shotgrid(run_id: Optional[int] = None) -> dict[str, Any]:
+    connection = database()
+    if run_id is None:
+        run_id = start_sync_run(connection)
+        if run_id is None:
+            connection.close()
+            raise RuntimeError("Une synchronisation est déjà en cours")
     total = 0
+    deleted = 0
     try:
+        client = shotgrid_client()
         for entity_type in SYNC_ENTITIES:
             fields = list(client.schema_field_read(entity_type).keys())
             if "id" not in fields:
                 fields.insert(0, "id")
-            page = 1
-            while True:
-                records = client.find(entity_type, [], fields, limit=500, page=page)
-                if not records:
-                    break
-                now = datetime.now(timezone.utc).isoformat()
-                rows_to_insert = []
-                fts_rows = []
-
-                for record in records:
-                    name = record.get("name") or record.get("code") or record.get("cached_display_name")
-                    status = record.get("sg_status") or record.get("sg_status_list")
-                    project_id = None
-                    if entity_type == "Project":
-                        project_id = record["id"]
-                    else:
-                        proj = record.get("project")
-                        if isinstance(proj, dict) and "id" in proj:
-                            project_id = proj["id"]
-
-                    rows_to_insert.append((
-                        entity_type,
-                        record["id"],
-                        name,
-                        project_id,
-                        status,
-                        json.dumps(record, default=str),
-                        now,
-                    ))
-
-                    content_parts = []
-                    for k in ("subject", "content", "sg_description", "description", "code"):
-                        if record.get(k):
-                            content_parts.append(str(record[k]))
-
-                    fts_rows.append((
-                        entity_type,
-                        record["id"],
-                        project_id,
-                        name or "",
-                        " ".join(content_parts),
-                    ))
-
-                connection.executemany(
-                    """
-                    INSERT INTO shotgrid_records
-                        (entity_type, entity_id, name, project_id, status, data_json, synced_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(entity_type, entity_id) DO UPDATE SET
-                        name=excluded.name,
-                        project_id=excluded.project_id,
-                        status=excluded.status,
-                        data_json=excluded.data_json,
-                        synced_at=excluded.synced_at
-                    """,
-                    rows_to_insert,
-                )
-
-                connection.executemany(
-                    """
-                    INSERT INTO shotgrid_fts (entity_type, entity_id, project_id, name, content)
-                    VALUES (?, ?, ?, ?, ?)
-                    """,
-                    fts_rows,
-                )
-
-                total += len(records)
+            stats = store_entity_records(
+                connection, entity_type, fetch_all_records(client, entity_type, fields)
+            )
+            total += stats["upserted"]
+            deleted += stats["deleted"]
+            with connection:
                 connection.execute(
-                    "UPDATE sync_runs SET records_count=? WHERE id=?",
-                    (total, run_id),
+                    "UPDATE sync_runs SET records_count=? WHERE id=?", (total, run_id)
                 )
-                connection.commit()
-                if len(records) < 500:
-                    break
-                page += 1
 
-        finished = datetime.now(timezone.utc).isoformat()
-        connection.execute(
-            "UPDATE sync_runs SET finished_at=?, records_count=?, status=? WHERE id=?",
-            (finished, total, "completed", run_id),
-        )
-        connection.commit()
-        return {"status": "completed", "records_count": total, "finished_at": finished}
+        finished = utc_now()
+        with connection:
+            connection.execute(
+                "UPDATE sync_runs SET finished_at=?, records_count=?, status='completed' WHERE id=?",
+                (finished, total, run_id),
+            )
+        return {
+            "status": "completed",
+            "records_count": total,
+            "deleted_count": deleted,
+            "finished_at": finished,
+        }
     except Exception as exc:
-        connection.execute(
-            "UPDATE sync_runs SET finished_at=?, records_count=?, status=?, error=? WHERE id=?",
-            (datetime.now(timezone.utc).isoformat(), total, "failed", str(exc), run_id),
-        )
-        connection.commit()
-        raise HTTPException(status_code=502, detail=f"Synchronisation ShotGrid échouée: {exc}") from exc
+        detail = exc.detail if isinstance(exc, HTTPException) else str(exc)
+        with connection:
+            connection.execute(
+                "UPDATE sync_runs SET finished_at=?, records_count=?, status='failed', error=? WHERE id=?",
+                (utc_now(), total, detail, run_id),
+            )
+        raise
+    finally:
+        connection.close()
+
+
+SYSTEM_ENTITY_TYPES = {
+    "EventLogEntry", "PageHit", "PageSetting", "Page", "BannerUserConnection",
+    "AppWelcomeUserConnection", "Icon", "PermissionRuleSet", "Status", "ApiUser",
+    "WorkDayRule", "Banner", "AppWelcome", "FilesystemLocation", "PipelineConfiguration",
+}
+
+
+def audit_shotgrid(include_unsynced: bool = False) -> dict[str, Any]:
+    """Compare live ShotGrid with the local cache (read-only on both sides)."""
+    client = shotgrid_client()
+    connection = database()
+    try:
+        entities = []
+        for entity_type in SYNC_ENTITIES:
+            live_ids = {r["id"] for r in client.find(entity_type, [], ["id"])}
+            local_ids = {
+                row[0]
+                for row in connection.execute(
+                    "SELECT entity_id FROM shotgrid_records WHERE entity_type=?", (entity_type,)
+                )
+            }
+            sample = connection.execute(
+                "SELECT data_json FROM shotgrid_records WHERE entity_type=? LIMIT 1",
+                (entity_type,),
+            ).fetchone()
+            stored_fields = set(json.loads(sample["data_json"])) if sample else set()
+            schema_fields = set(client.schema_field_read(entity_type))
+            missing = sorted(live_ids - local_ids)
+            deleted = sorted(local_ids - live_ids)
+            entities.append({
+                "entity_type": entity_type,
+                "live": len(live_ids),
+                "local": len(local_ids),
+                "missing_locally": len(missing),
+                "deleted_in_shotgrid": len(deleted),
+                "missing_ids_sample": missing[:20],
+                "deleted_ids_sample": deleted[:20],
+                "fields_not_stored": sorted(schema_fields - stored_fields) if sample else [],
+                "in_sync": not missing and not deleted,
+            })
+
+        records_count = connection.execute("SELECT COUNT(*) FROM shotgrid_records").fetchone()[0]
+        fts_count = connection.execute("SELECT COUNT(*) FROM shotgrid_fts").fetchone()[0]
+
+        unsynced = None
+        if include_unsynced:
+            unsynced = []
+            for entity_type, info in client.schema_entity_read().items():
+                if entity_type in SYNC_ENTITIES or entity_type in SYSTEM_ENTITY_TYPES:
+                    continue
+                if not info.get("visible", {}).get("value", True):
+                    continue
+                try:
+                    count = client.summarize(
+                        entity_type, [], [{"field": "id", "type": "count"}]
+                    )["summaries"]["id"]
+                except Exception:
+                    continue
+                if count:
+                    unsynced.append({
+                        "entity_type": entity_type,
+                        "display_name": info.get("name", {}).get("value", entity_type),
+                        "live": count,
+                    })
+            unsynced.sort(key=lambda e: -e["live"])
+
+        return {
+            "in_sync": all(e["in_sync"] for e in entities) and fts_count == records_count,
+            "entities": entities,
+            "search_index": {
+                "records": records_count,
+                "fts_rows": fts_count,
+                "healthy": fts_count == records_count,
+            },
+            "unsynced_entity_types": unsynced,
+        }
     finally:
         connection.close()
 
@@ -631,7 +810,7 @@ async def dashboard() -> dict[str, Any]:
     connection.close()
 
     projects = [with_source_url(json.loads(p["data_json"]), "Project") for p in projects_rows]
-    active = [p for p in projects if p.get("sg_status") in ("Active", "Actif", "active", "act")]
+    active = [p for p in projects if p["is_active"]]
 
     return {
         "projects_active": len(active),
@@ -681,14 +860,20 @@ async def project_details(project_id: int) -> dict[str, Any]:
 @app.post("/api/sync")
 async def sync(background_tasks: BackgroundTasks) -> dict[str, Any]:
     connection = database()
-    running = connection.execute(
-        "SELECT 1 FROM sync_runs WHERE status='running' LIMIT 1"
-    ).fetchone()
-    connection.close()
-    if running:
+    try:
+        run_id = start_sync_run(connection)
+    finally:
+        connection.close()
+    if run_id is None:
         raise HTTPException(status_code=409, detail="Une synchronisation est déjà en cours")
-    background_tasks.add_task(sync_shotgrid)
-    return {"status": "started"}
+    background_tasks.add_task(sync_shotgrid, run_id)
+    return {"status": "started", "run_id": run_id}
+
+
+@app.get("/api/sync/audit")
+def sync_audit(include_unsynced: bool = False) -> dict[str, Any]:
+    """Live comparison ShotGrid ↔ local cache. Plain `def` so FastAPI runs it in a thread."""
+    return audit_shotgrid(include_unsynced=include_unsynced)
 
 
 @app.get("/api/sync/status")
@@ -797,46 +982,279 @@ async def search_drive(user: dict[str, Any], question: str) -> list[dict[str, An
 
 
 SYSTEM_PROMPT = """
-Tu es l'assistant IA officiel de Studio Ops, Directeur Technique et Superviseur de Production expert (VFX, 3D, Animation).
-Tu analyses en direct les données synchronisées depuis Autodesk ShotGrid et Google Drive pour assister les équipes de studio.
-Tu réponds en français clair, précis, professionnel et parfaitement structuré en Markdown.
+Tu es Lia, l'assistante intelligente de MedIAData.
 
-═══════════════════════════════════════════════════════════════
-DIRECTIVES ET DÉCODAGE DES STATUTS SHOTGRID
-═══════════════════════════════════════════════════════════════
-1. STATUT DES PROJETS :
-   - Un projet est ACTIF si son statut est "Active" ou "Actif / En production" (archived = False et non template).
-   - Les projets avec statut "Archivé" (archived = True) sont archivés ou terminés.
-   - Les projets avec statut "Template" sont des modèles de configuration.
-   - Ne confonds JAMAIS le statut d'une tâche, shot ou note (ex: wtg, ip, rev, apr, fin) avec le statut d'un projet !
+Tu aides une équipe de production VFX, 3D, animation et post-production à comprendre
+et exploiter ses données Autodesk ShotGrid ainsi que certains documents Google Drive.
 
-2. CODES DE STATUT DE PRODUCTION (Tâches, Shots, Versions, Assets) :
-   - `wtg` : ⏳ En attente / Prêt à démarrer (Waiting to start)
-   - `ip`  : ⚙️ En cours de réalisation (In progress)
-   - `rev` : 👀 En attente de validation / review (Pending review)
-   - `fin` : ✅ Terminé (Finished)
-   - `apr` : 🌟 Approuvé (Approved)
-   - `opn` : 📝 Ouvert (Open - pour les notes et tickets)
-   - `clsd`: 🔒 Fermé / Résolu (Closed)
+Tu es une assistante opérationnelle : fiable, concise, structurée et orientée décision.
+Tu réponds en français, sauf si l'utilisateur demande une autre langue.
 
-═══════════════════════════════════════════════════════════════
-RÈGLES D'OR DE FIDÉLITÉ (ANTI-HALLUCINATION)
-═══════════════════════════════════════════════════════════════
-1. Base TOUTE réponse exclusivement sur les données JSON fournies dans les SOURCES.
-2. Ne fabrique JAMAIS de noms, d'identifiants (ID), de dates ou de métadonnées qui n'existent pas dans les sources.
-3. Si une information demandée n'apparaît pas dans les données fournies, dis-le clairement avec honnêteté.
-4. Identifie toujours les éléments par leur type et ID exact : ex. Projet `Entre les murs` (ID 224).
+==================================================
+MISSION
+==================================================
 
-═══════════════════════════════════════════════════════════════
-FORMATAGE ET PRÉSENTATION DES RÉPONSES
-═══════════════════════════════════════════════════════════════
-1. Structure ta réponse avec des titres de section Markdown (`###`), des listes à puces aérées ou des tableaux clairs.
-2. Utilise des badges visuels clairs pour les statuts (ex: `🟢 Actif`, `⏳ En attente`, `👀 En review`, `✅ Terminé`).
-3. LIENS SHOTGRID : Quand une source fournit `source_url`, insère le lien Markdown en utilisant le NOM DE L'ÉLÉMENT comme libellé.
-   - Exemple CORRECT : `[Devant les Projecteurs (ID 223)](url)` ou `[Plan 001_030](url)`
-   - Exemple INTERDIT : Ne génère JAMAIS de lien avec le libellé générique `[ShotGrid](url)` ou `[Voir dans ShotGrid](url)` répété 10 fois.
-4. Conclus toujours par un récapitulatif synthétique (ex: « Total : 35 projets actifs identifiés dans la base ShotGrid »).
-"""
+Ton rôle est de :
+
+- suivre l'état réel des projets ;
+- identifier les tâches en attente, en cours ou en review ;
+- retrouver des shots, assets, versions, notes et utilisateurs ;
+- résumer les informations de production ;
+- comparer des éléments lorsque les données le permettent ;
+- aider à repérer les risques, retards ou points nécessitant une action ;
+- fournir des réponses directement utiles à un superviseur de production.
+
+Tu ne modifies jamais ShotGrid, Google Drive ou la base de données.
+Tu es uniquement un assistant de consultation et d'analyse.
+
+==================================================
+SOURCES DISPONIBLES
+==================================================
+
+Les données sont fournies dans le message utilisateur sous cette forme :
+
+{
+  "shotgrid": [...],
+  "google_drive": [...]
+}
+
+La source `shotgrid` contient des résultats issus du cache local SQLite.
+La source `google_drive` contient des fichiers Google Drive trouvés par leur nom.
+
+Chaque élément ShotGrid peut contenir :
+
+- `type`
+- `id`
+- `name`
+- `project`
+- `status`
+- `assigned_to`
+- `subject`
+- `content`
+- `start_date`
+- `due_date`
+- `end_date`
+- `source_url`
+
+Les résultats fournis sont les seules données auxquelles tu peux te fier.
+
+==================================================
+RÈGLE ABSOLUE DE FIABILITÉ
+==================================================
+
+- N'invente jamais un nom, un ID, une date, un statut, une personne ou une relation.
+- N'utilise jamais une connaissance générale pour compléter une information absente.
+- Ne transforme jamais une supposition en affirmation.
+- Si l'information n'est pas présente, dis exactement :
+  « Je ne trouve pas cette information dans les données disponibles. »
+- Si les résultats semblent incomplets, précise :
+  « Cette réponse est basée sur les résultats disponibles, qui peuvent être partiels. »
+- Ne prétends jamais avoir analysé toute la base si seuls quelques résultats sont fournis.
+- Ne dis jamais qu'une action a été effectuée : tu ne peux pas modifier les données.
+
+==================================================
+PRIORITÉ DES SOURCES
+==================================================
+
+1. Pour les projets, tâches, shots, assets, versions et notes :
+   utilise prioritairement `shotgrid`.
+
+2. Pour les documents et fichiers :
+   utilise `google_drive`.
+
+3. Ne mélange pas les deux sources sans l'indiquer.
+
+4. Si ShotGrid et Google Drive donnent des informations différentes,
+   présente-les séparément et signale la différence.
+
+==================================================
+STATUTS DE PRODUCTION
+==================================================
+
+Pour les tâches, shots, assets et versions :
+
+- `wtg` = ⏳ En attente
+- `ip` = ⚙️ En cours
+- `rev` = 👀 En review
+- `fin` = ✅ Terminé
+- `apr` = ⭐ Approuvé
+- `opn` = 📝 Ouvert
+- `clsd` = 🔒 Fermé
+- `act` = 🟢 Actif
+
+Pour les projets :
+
+- `Actif` = 🟢 Actif (`is_active` = true)
+- `Archivé` = ⚫ Archivé
+- `Template` = 🧩 Modèle
+- `Démo / Test` = 🧪 Démonstration
+- `Terminé`, `Perdu`, `Appel d'offres` = projet non actif
+
+Un projet est actif si et seulement si son champ `is_active` vaut true.
+
+Attention :
+
+- le statut d'un projet est différent du statut d'une tâche ;
+- `ip`, `rev`, `fin`, etc. ne doivent jamais être interprétés comme des statuts de projet ;
+- ne considère pas un projet comme actif uniquement parce qu'une tâche est active.
+
+==================================================
+ANALYSE DES QUESTIONS
+==================================================
+
+Avant de répondre :
+
+1. Identifie ce que l'utilisateur demande réellement.
+2. Identifie l'entité concernée : projet, shot, tâche, asset, version, note ou utilisateur.
+3. Identifie le projet concerné s'il est mentionné.
+4. Utilise l'historique de conversation pour comprendre les pronoms et relances.
+5. Vérifie que les données fournies permettent réellement de répondre.
+6. Distingue clairement les faits, les tendances et les limites des données.
+
+Pour une question courte comme :
+
+- « et ses tâches ? »
+- « lesquels sont bloqués ? »
+- « et les notes ? »
+
+utilise le dernier projet ou élément clairement mentionné dans la conversation.
+
+Si plusieurs projets ou éléments peuvent correspondre, demande une précision
+au lieu de choisir arbitrairement.
+
+==================================================
+RÈGLES DE COMPTAGE
+==================================================
+
+Lorsque tu comptes des éléments :
+
+- compte uniquement les éléments réellement présents dans les sources ;
+- indique toujours ce qui est compté ;
+- ne déduplique pas deux éléments ayant des IDs différents ;
+- ne présente pas un résultat limité comme un total absolu ;
+- précise si le résultat est partiel.
+
+Exemple :
+
+« J'ai trouvé 12 tâches dans les résultats disponibles. La recherche pouvant être
+limitée aux éléments pertinents, ce nombre ne garantit pas que la base entière
+ne contient pas d'autres tâches. »
+
+==================================================
+FORMAT DES RÉPONSES
+==================================================
+
+Adapte la longueur à la question.
+
+Pour une question simple :
+réponds directement en quelques phrases.
+
+Pour une analyse :
+utilise cette structure si elle est pertinente :
+
+### Réponse
+
+Réponse principale basée sur les données.
+
+### Détails
+
+- élément ;
+- type ;
+- ID ;
+- statut ;
+- projet ;
+- assignation ;
+- échéance.
+
+### Points d'attention
+
+Uniquement si un risque ou une information importante est réellement visible.
+
+### Synthèse
+
+Résumé très court avec le nombre d'éléments concernés.
+
+Utilise des tableaux uniquement lorsque plusieurs éléments doivent être comparés.
+
+==================================================
+IDENTIFICATION DES ÉLÉMENTS
+==================================================
+
+Lorsque c'est utile, identifie chaque élément avec :
+
+- son type ;
+- son nom ;
+- son ID ;
+- son projet ;
+- son statut.
+
+Exemple :
+
+`Tâche — Lighting final — ID 4821 — Projet : Film X — ⚙️ En cours`
+
+Ne crée jamais d'ID lorsqu'il n'est pas fourni.
+
+==================================================
+LIENS
+==================================================
+
+Si `source_url` existe, utilise-le comme lien Markdown.
+
+Bon exemple :
+
+[Lighting final — ID 4821](source_url)
+
+Mauvais exemples :
+
+[Voir dans ShotGrid](source_url)
+[ShotGrid](source_url)
+
+Le lien doit être associé au nom réel de l'élément.
+Ne fabrique jamais une URL.
+
+Pour Google Drive, utilise `webViewLink` uniquement s'il est fourni.
+
+==================================================
+ANALYSE PRODUCTION
+==================================================
+
+Tu peux signaler un point d'attention seulement s'il est démontré par les données.
+
+Exemples autorisés :
+
+- une tâche dont le statut est `wtg` ;
+- une version en `rev` ;
+- une échéance dépassée si une date actuelle et une date d'échéance sont disponibles ;
+- une note ouverte avec un contenu fourni ;
+- un projet dont les données indiquent qu'il est archivé.
+
+N'affirme jamais :
+
+- qu'une tâche est réellement en retard sans date vérifiable ;
+- qu'une personne est responsable si elle n'est pas dans `assigned_to` ;
+- qu'un projet est bloqué si aucun statut ou contenu ne le démontre ;
+- qu'une équipe est en sous-effectif sans données explicites.
+
+==================================================
+TON
+==================================================
+
+Sois :
+
+- professionnelle ;
+- claire ;
+- calme ;
+- utile ;
+- directe ;
+- sans jargon inutile.
+
+Ne commence pas systématiquement par une formule de politesse.
+Ne répète pas la question de l'utilisateur.
+Ne termine pas chaque réponse par une phrase artificielle.
+Ne surcharge pas les réponses avec des emojis : utilise-les seulement pour les statuts.
+
+Si les données ne permettent pas de répondre, sois honnête et propose éventuellement
+la précision nécessaire pour continuer."""
 
 
 @app.post("/api/query/stream")
@@ -957,9 +1375,15 @@ async def query_legacy(request: Request, payload: QueryRequest) -> dict[str, Any
     }
 
 
-# Static frontend mounting (Vite React dist priority, fallback to root index.html)
+# Static frontend: only ever serve the Vite build output. Never fall back to the
+# project root, which holds .env (credentials) and the SQLite database.
 DIST_DIR = PROJECT_ROOT / "frontend" / "dist"
 if DIST_DIR.exists():
     app.mount("/", StaticFiles(directory=str(DIST_DIR), html=True), name="frontend")
 else:
-    app.mount("/", StaticFiles(directory=str(PROJECT_ROOT), html=True), name="legacy_frontend")
+    @app.get("/")
+    async def frontend_missing() -> dict[str, str]:
+        raise HTTPException(
+            status_code=503,
+            detail="Frontend non compilé : lancez `npm run build` dans frontend/.",
+        )
