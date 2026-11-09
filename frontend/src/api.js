@@ -1,59 +1,73 @@
-const API_BASE = "";
-
-export async function fetchDashboard() {
-  const res = await fetch(`${API_BASE}/api/dashboard`);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
-}
-
-export async function fetchProjectDetails(id) {
-  const res = await fetch(`${API_BASE}/api/projects/${id}`);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
-}
-
-export async function fetchEntityData({ entity, page = 1, limit = 50, search = "", status = "", projectId = null }) {
-  const params = new URLSearchParams({ page, limit });
-  if (search) params.append("search", search);
-  if (status) params.append("status", status);
-  if (projectId) params.append("project_id", projectId);
-
-  const res = await fetch(`${API_BASE}/api/data/${entity}?${params.toString()}`);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
-}
-
-export async function fetchModels() {
-  const res = await fetch(`${API_BASE}/api/models`);
-  if (!res.ok) return { models: [], default: "" };
-  return res.json();
-}
-
-export async function triggerSync() {
-  const res = await fetch(`${API_BASE}/api/sync`, { method: "POST" });
+async function getJSON(url) {
+  const res = await fetch(url);
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
-    throw new Error(data.detail || `HTTP ${res.status}`);
+    throw new Error(data.detail || `Erreur HTTP ${res.status}`);
   }
   return res.json();
 }
 
-export async function fetchSyncStatus() {
-  const res = await fetch(`${API_BASE}/api/sync/status`);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
+function qs(params) {
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([k, v]) => {
+    if (v !== undefined && v !== null && v !== "" && v !== false) search.append(k, v);
+  });
+  const s = search.toString();
+  return s ? `?${s}` : "";
 }
 
-export async function fetchMe() {
-  const res = await fetch(`${API_BASE}/api/me`);
-  if (!res.ok) return { authenticated: false };
-  return res.json();
+export const api = {
+  dashboard: () => getJSON("/api/dashboard"),
+  project: (id) => getJSON(`/api/projects/${id}`),
+  records: (entityType, params = {}) => getJSON(`/api/records/${entityType}${qs(params)}`),
+  people: () => getJSON("/api/people"),
+  person: (id) => getJSON(`/api/people/${id}`),
+  search: (q) => getJSON(`/api/search${qs({ q, limit: 12 })}`),
+  statuses: () => getJSON("/api/statuses"),
+  entityTypes: () => getJSON("/api/entity-types"),
+  models: () => getJSON("/api/models").catch(() => ({ models: [], default: "" })),
+  me: () => getJSON("/api/me").catch(() => ({ authenticated: false })),
+  syncStatus: () => getJSON("/api/sync/status"),
+  syncRuns: () => getJSON("/api/sync/runs"),
+  syncAudit: (includeUnsynced) => getJSON(`/api/sync/audit${qs({ include_unsynced: includeUnsynced })}`),
+  async startSync(mode = "auto") {
+    const res = await fetch(`/api/sync${qs({ mode })}`, { method: "POST" });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.detail || `Erreur HTTP ${res.status}`);
+    }
+    return res.json();
+  },
+};
+
+/* Thumbnails: requests made within the same tick are batched into one call per type. */
+const thumbQueues = new Map();
+export function fetchThumbnail(entityType, id) {
+  return new Promise((resolve) => {
+    let queue = thumbQueues.get(entityType);
+    if (!queue) {
+      queue = new Map();
+      thumbQueues.set(entityType, queue);
+      setTimeout(async () => {
+        thumbQueues.delete(entityType);
+        const ids = [...queue.keys()];
+        let urls = {};
+        try {
+          urls = await getJSON(`/api/thumbnails${qs({ entity_type: entityType, ids: ids.join(",") })}`);
+        } catch {
+          /* thumbnails are optional */
+        }
+        queue.forEach((resolvers, key) => resolvers.forEach((r) => r(urls[key] || null)));
+      }, 40);
+    }
+    if (!queue.has(String(id))) queue.set(String(id), []);
+    queue.get(String(id)).push(resolve);
+  });
 }
 
-export function streamChatQuery({ question, history, model, onSources, onToken, onError, onDone }) {
+export function streamChat({ question, history, model, onSources, onToken, onError, onDone }) {
   const controller = new AbortController();
-
-  fetch(`${API_BASE}/api/query/stream`, {
+  fetch("/api/query/stream", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ question, history, model }),
@@ -61,48 +75,36 @@ export function streamChatQuery({ question, history, model, onSources, onToken, 
   })
     .then(async (response) => {
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.detail || `Erreur HTTP ${response.status}`);
       }
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
-
-      while (true) {
+      for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
-
         buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n\n");
-        buffer = lines.pop();
-
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          const raw = line.slice(6).trim();
-          if (!raw) continue;
+        const events = buffer.split("\n\n");
+        buffer = events.pop();
+        for (const evt of events) {
+          if (!evt.startsWith("data: ")) continue;
+          let event;
           try {
-            const event = JSON.parse(raw);
-            if (event.type === "sources" && onSources) {
-              onSources(event.sources);
-            } else if (event.type === "token" && onToken) {
-              onToken(event.token);
-            } else if (event.type === "error" && onError) {
-              onError(new Error(event.error));
-            } else if (event.type === "done" && onDone) {
-              onDone();
-            }
-          } catch (e) {
-            console.error("JSON parse error:", e);
+            event = JSON.parse(evt.slice(6));
+          } catch {
+            continue;
           }
+          if (event.type === "sources") onSources?.(event.sources);
+          else if (event.type === "token") onToken?.(event.token);
+          else if (event.type === "error") onError?.(new Error(event.error));
         }
       }
-      if (onDone) onDone();
+      onDone?.();
     })
     .catch((err) => {
-      if (err.name !== "AbortError" && onError) {
-        onError(err);
-      }
+      if (err.name !== "AbortError") onError?.(err);
+      onDone?.();
     });
-
   return controller;
 }
-
