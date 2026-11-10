@@ -1,7 +1,7 @@
 """SQLite connection and schema management (versioned with PRAGMA user_version)."""
 import json
 import sqlite3
-from typing import Any, Iterable
+from typing import Any, Iterable, Optional
 
 from backend import config
 from backend.records import fts_content, iter_links
@@ -10,8 +10,15 @@ SCHEMA_VERSION = 2
 _initialized: set[str] = set()
 
 
-def database() -> sqlite3.Connection:
-    """Open a connection, creating/migrating the schema the first time a path is used."""
+def database(visible_projects: Optional[Iterable[int]] = None) -> sqlite3.Connection:
+    """Open a connection, creating/migrating the schema the first time a path is used.
+
+    With `visible_projects`, the connection is restricted to what one user may see: a
+    TEMP view named `shotgrid_records` shadows the real table for every query made on
+    this connection (joins, full-text search and the assistant included). Records of
+    other productions simply do not exist for it, and writes through it are refused.
+    `None` means unrestricted (sync, admin tasks, users who see everything).
+    """
     path = config.settings.database_path
     connection = sqlite3.connect(path, timeout=30)
     connection.row_factory = sqlite3.Row
@@ -20,6 +27,12 @@ def database() -> sqlite3.Connection:
     if path not in _initialized:
         ensure_schema(connection)
         _initialized.add(path)
+    if visible_projects is not None:
+        ids = ",".join(str(int(p)) for p in sorted(set(visible_projects))) or "NULL"
+        connection.execute(
+            "CREATE TEMP VIEW shotgrid_records AS SELECT rowid AS rowid, * FROM main.shotgrid_records "
+            f"WHERE project_id IS NULL OR project_id IN ({ids})"
+        )
     return connection
 
 
@@ -68,6 +81,14 @@ def _create_base_tables(connection: sqlite3.Connection) -> None:
             record_count INTEGER NOT NULL DEFAULT 0,
             last_synced_at TEXT,
             last_full_sync_at TEXT
+        );
+
+        -- Signed-in sessions (the cookie only holds the random key).
+        CREATE TABLE IF NOT EXISTS user_sessions (
+            session_key TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL
         );
 
         -- Google OAuth tokens kept server-side; the session cookie only holds a random key.

@@ -53,5 +53,33 @@ class Settings:
     # A full sync (re-checks every record) runs when the last one is older than this.
     full_sync_every_hours: int = _int_env("FULL_SYNC_EVERY_HOURS", 24)
 
+    # --- Sign-in with Autodesk (APS OAuth / OpenID Connect) ---
+    aps_client_id: str = os.getenv("APS_CLIENT_ID", "")
+    aps_client_secret: str = os.getenv("APS_CLIENT_SECRET", "")
+    aps_callback_url: str = os.getenv("APS_CALLBACK_URL", "")
+    session_days: int = _int_env("SESSION_DAYS", 7)
+    # ShotGrid permission groups (HumanUser.permission_rule_set) that see every production.
+    # Everyone else sees only the productions they are a member of. "Audit - Conseil" is
+    # included because the sync account has that role and ShotGrid lets it read every project.
+    roles_see_all: str = os.getenv("ROLES_SEE_ALL", "Admin,Admin Copy,Manager,Supervisor,Audit - Conseil")
+    # Groups allowed to run syncs and see the sync page.
+    admin_roles: str = os.getenv("ADMIN_ROLES", "Admin,Admin Copy")
+    # Local development only: sign in as this ShotGrid login/e-mail without Autodesk.
+    # Ignored unless APP_BASE_URL points to localhost.
+    dev_login_as: str = os.getenv("DEV_LOGIN_AS", "")
+
+    @property
+    def autodesk_login_enabled(self) -> bool:
+        return bool(self.aps_client_id and self.aps_client_secret)
+
+    @property
+    def dev_login_enabled(self) -> bool:
+        host = self.app_base_url.split("//")[-1].split("/")[0].split(":")[0]
+        return bool(self.dev_login_as) and host in ("localhost", "127.0.0.1")
+
+
+def role_set(value: str) -> set[str]:
+    return {r.strip().casefold() for r in value.split(",") if r.strip()}
+
 
 settings = Settings()

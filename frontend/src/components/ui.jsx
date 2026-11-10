@@ -60,7 +60,6 @@ export function Status({ code, labels }) {
     <span className="status" title={code}>
       <i className={`dot ${bucketOf(code)}`} />
       {name || code}
-      {name && name.toLowerCase() !== code && <span className="code">{code}</span>}
     </span>
   );
 }

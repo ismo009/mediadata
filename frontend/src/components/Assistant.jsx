@@ -9,12 +9,14 @@ const KIND = { Project: "Production", Task: "Tâche", Shot: "Plan", Sequence: "S
   Version: "Version", Note: "Note", HumanUser: "Personne", TimeLog: "Temps", Playlist: "Playlist" };
 
 function suggestionsFor(projectName) {
+  const mine = ["Quelles sont mes tâches en retard ?", "Qu'est-ce que je dois rendre cette semaine ?"];
   if (projectName) {
     return [
       `Où en est ${projectName} ?`,
       `Quelles tâches sont en retard sur ${projectName} ?`,
       `Quelles tâches sont bloquées sur ${projectName} ?`,
       `Résume les dernières notes de ${projectName}`,
+      mine[0],
     ];
   }
   return [
@@ -22,6 +24,7 @@ function suggestionsFor(projectName) {
     "Combien de tâches sont en retard, par production ?",
     "Quelles tâches attendent une validation ?",
     "Qui a le plus de tâches ouvertes ?",
+    ...mine,
   ];
 }
 

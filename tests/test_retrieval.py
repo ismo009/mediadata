@@ -2,7 +2,7 @@
 import pytest
 
 from backend import sync
-from backend.assistant import compact_record_for_llm
+from backend.assistant import source_item
 from backend.retrieval import retrieve
 
 
@@ -97,15 +97,10 @@ def test_note_lookup_by_id(synced):
     assert ids(retrieve("note #50"), "Note") == {50}
 
 
-def test_compact_record_keeps_business_fields(synced):
+def test_source_item_for_the_ui(synced):
     record = next(r for r in retrieve("tâches bloquées")["records"] if r["id"] == 100)
-    compact = compact_record_for_llm(record, "Task")
-    assert compact["name"] == "comp sh020"
-    assert compact["step"] == "Compositing"
-    assert compact["entity"] == "SH020"
-    assert compact["assigned_to"] == ["Marie Curie"]
-    assert compact["late"] is True
-    assert compact["blocked_by"] == ["anim sh020 (wtg)"]
+    assert source_item(record) == {"type": "Task", "id": 100, "name": "comp sh020",
+                                   "source_url": "https://example.shotgrid.test/detail/Task/100"}
 
 
 def test_step_name_shared_by_several_steps_matches_all(fake):

@@ -1,15 +1,5 @@
-"""HTTP API used by the UI."""
+"""HTTP API used by the UI (signed in as an Admin, who sees everything)."""
 import pytest
-from fastapi.testclient import TestClient
-
-from backend import main, sync
-
-
-@pytest.fixture
-def http(fake):
-    sync.sync_shotgrid(mode="full")
-    with TestClient(main.app) as client:
-        yield client
 
 
 def test_dashboard(http):
@@ -40,6 +30,7 @@ def test_project_details(http):
     ({"late": True}, {100}),
     ({"sequence_id": 10, "bucket": "waiting"}, {101}),
     ({"search": "lighting"}, {104}),
+    ({"project_id": 1, "bucket": "open"}, {100, 101, 103}),
 ])
 def test_records_filters(http, params, expected):
     data = http.get("/api/records/Task", params=params).json()
@@ -83,10 +74,6 @@ def test_sync_endpoints(http):
 
 def test_legacy_query_endpoint_removed(http):
     assert http.post("/api/query", json={"question": "x"}).status_code in (404, 405)
-
-
-def test_me_is_anonymous_without_login(http):
-    assert http.get("/api/me").json() == {"authenticated": False}
 
 
 def test_project_root_is_never_served(http):

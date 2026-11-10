@@ -2,7 +2,7 @@
 
 Tableau de bord local pour suivre des productions d'animation, de VFX et de tournage à partir d'**Autodesk ShotGrid** (Flow Production Tracking), avec **Lia**, une assistante qui répond aux questions en langage naturel grâce à un modèle **Ollama** exécuté sur la machine.
 
-L'application garde une copie locale de ShotGrid dans SQLite, synchronisée automatiquement. L'interface et l'assistante lisent cette copie : tout est rapide, et rien n'est jamais modifié dans ShotGrid.
+L'application garde une copie locale de ShotGrid dans SQLite, synchronisée automatiquement. L'interface et l'assistante lisent cette copie : tout est rapide, et rien n'est jamais modifié dans ShotGrid. Chaque personne se connecte avec son compte Autodesk et ne voit que les productions auxquelles elle a droit.
 
 ---
 
@@ -10,30 +10,38 @@ L'application garde une copie locale de ShotGrid dans SQLite, synchronisée auto
 
 1. [Ce que fait l'application](#ce-que-fait-lapplication)
 2. [Lia, l'assistante](#lia-lassistante)
-3. [Architecture](#architecture)
-4. [Installation](#installation)
-5. [Lancement](#lancement)
-6. [Synchronisation avec ShotGrid](#synchronisation-avec-shotgrid)
-7. [Tests et évaluation](#tests-et-évaluation)
-8. [Référence de l'API](#référence-de-lapi)
-9. [Dépannage](#dépannage)
+3. [Connexion et droits](#connexion-et-droits)
+4. [Architecture](#architecture)
+5. [Installation](#installation)
+6. [Lancement](#lancement)
+7. [Synchronisation avec ShotGrid](#synchronisation-avec-shotgrid)
+8. [Tests et évaluation](#tests-et-évaluation)
+9. [Référence de l'API](#référence-de-lapi)
+10. [Dépannage](#dépannage)
 
 ---
 
 ## Ce que fait l'application
 
+L'interface montre peu de choses à la fois : l'accueil liste les productions, et tout le détail apparaît quand on clique sur l'une d'elles.
+
 | Page | Contenu |
 |---|---|
-| **Vue d'ensemble** | Une barre d'avancement par production (tâches terminées, en review, en cours, en attente), triée par retard, activité ou nom. Nombre de tâches en retard et dernières notes. |
-| **Production** | Synthèse par étape et par séquence, tâches en retard, tâches bloquées par une tâche amont, équipe, dernières notes. Onglets *Tâches* (filtres par étape, personne, statut, retard, blocage ; recherche ; pagination), *Plans* (vignettes), *Assets*, *Notes*, *Versions*. |
+| **Connexion** | Bouton « Se connecter avec Autodesk ». Voir [Connexion et droits](#connexion-et-droits). |
+| **Productions** (accueil) | Une carte par production visible : nom, dernière activité, pourcentage de tâches terminées et nombre de tâches en retard. Recherche, tri (activité récente, les plus en retard, nom) et filtre « Mes productions / En cours / Toutes ». |
+| **Mes tâches** | Les tâches assignées à la personne connectée, toutes productions confondues (non terminées par défaut). |
+| **Production** | Quatre chiffres clés (% terminé, tâches, en retard, plans), puis des onglets. *Vue d'ensemble* : les 5 tâches à surveiller (en retard ou bloquées) et l'avancement par étape. *Tâches* : tableau filtrable par étape, personne et état (non terminées par défaut, en retard, bloquées…), avec recherche et tri. *Plans* (vignettes, filtre par séquence), *Équipe*, *Notes*, *Versions*, *Assets*. |
 | **Équipe** | Charge ouverte, tâches en review et en retard par personne, et fiche individuelle avec toutes ses tâches. |
-| **Synchronisation** | Historique des synchronisations, types de données synchronisés, bouton « Comparer avec ShotGrid » qui vérifie en direct que la copie locale est complète. |
+| **Synchronisation** (administrateurs) | Historique des synchronisations, types de données synchronisés, bouton « Comparer avec ShotGrid » qui vérifie en direct que la copie locale est complète. |
 
-Autres éléments :
-- **Recherche globale** avec `Ctrl K` sur les productions, plans, tâches, notes et personnes.
-- **Lia** s'ouvre dans un panneau latéral et sait quelle production est affichée.
-- **Thème clair ou sombre** (suit le système, bascule manuelle) ; interface utilisable sur mobile.
-- **Direction visuelle** : surfaces gris neutre, comme une salle d'étalonnage ; la couleur est réservée aux données (statuts, retards). Police Archivo.
+Dans la barre du haut :
+- **Recherche globale** (icône loupe ou `Ctrl K`) sur les productions, plans, tâches, notes et personnes visibles.
+- **Synchronisation** : l'icône indique l'état de la dernière synchronisation ; un administrateur peut en lancer une au clic.
+- **Thème** clair ou sombre (suit le système par défaut).
+- **Demander à Lia** ouvre l'assistante dans un panneau latéral ; elle sait qui lui parle et quelle production est affichée.
+- **Compte** (initiales) : nom, groupe ShotGrid, périmètre visible et déconnexion.
+
+L'interface est utilisable sur mobile. Direction visuelle : surfaces gris neutre, comme une salle d'étalonnage, la couleur étant réservée aux données (avancement, statuts, retards) ; police Archivo.
 
 ---
 
@@ -97,6 +105,49 @@ Une production est **active** si elle n'est ni archivée, ni un template, et que
 
 ---
 
+## Connexion et droits
+
+Chaque personne se connecte avec **son compte Autodesk**, le même que pour ShotGrid. L'application ne voit jamais son mot de passe : la connexion se fait sur la page d'Autodesk (avec sa double authentification), puis l'adresse e-mail du compte est rapprochée de l'utilisateur ShotGrid correspondant.
+
+### Ce que voit chaque personne
+
+| Groupe de droits ShotGrid (`permission_rule_set`) | Productions visibles |
+|---|---|
+| Groupes listés dans `ROLES_SEE_ALL` (par défaut Admin, Admin Copy, Manager, Supervisor, Audit - Conseil) | Toutes |
+| Tous les autres (Artist, Vendor…) | Seulement celles dont la personne est membre dans ShotGrid (champ *Users* de la production) |
+
+Ce filtre s'applique partout : accueil, pages de production, tâches, équipe, recherche, vignettes **et Lia**. Techniquement, chaque requête d'un utilisateur passe par une connexion SQLite où la table des enregistrements est remplacée par une vue qui ne contient que ses productions. Les éléments d'une autre production n'existent donc pas pour lui, même dans les totaux ou les classements, et Lia ne peut pas en parler puisqu'elle ne les reçoit jamais.
+
+Autres règles :
+- Seuls les groupes listés dans `ADMIN_ROLES` (par défaut Admin, Admin Copy) voient la page *Synchronisation* et peuvent lancer une synchronisation.
+- Un compte désactivé dans ShotGrid ne peut pas se connecter. Si plusieurs comptes ShotGrid actifs partagent la même adresse e-mail, la connexion est refusée tant qu'un administrateur n'a pas corrigé le doublon (sauf si l'un d'eux a cette adresse comme login).
+- Les droits sont relus à chaque requête depuis la copie locale : un changement de groupe ou d'équipe dans ShotGrid est pris en compte à la synchronisation suivante.
+- Lia comprend « mes tâches », « mes productions », « qu'est-ce que je dois rendre ? » : elle sait qui lui parle. La page *Mes tâches* liste les tâches assignées à la personne connectée.
+
+Limite actuelle : la règle ci-dessus approche les droits ShotGrid à partir du groupe et de l'appartenance aux productions. Les règles fines d'un groupe personnalisé (masquer certains champs, filtrer certaines entités) ne sont pas reproduites. Pour une correspondance exacte, il faudra interroger ShotGrid au nom de chaque utilisateur avec une clé de script autorisée à le faire (*sudo*).
+
+### Configurer la connexion Autodesk
+
+Le guide pas à pas, du compte développeur Autodesk à la mise en ligne en HTTPS, est dans [docs/connexion-autodesk.md](docs/connexion-autodesk.md). En résumé :
+
+1. Sur [aps.autodesk.com](https://aps.autodesk.com), préparez un plan APS (le niveau **Free** suffit) et un **developer hub** : Autodesk les exige avant toute création d'application.
+2. Dans **My applications**, créez une application de type **Traditional Web App**.
+3. Dans **Callback URL**, déclarez exactement `<APP_BASE_URL>/auth/autodesk/callback` : `http://localhost:8000/auth/autodesk/callback` pour tester sur son poste, puis `https://<domaine>/auth/autodesk/callback` pour le serveur de l'équipe (plusieurs URL sont acceptées). L'URL proposée par défaut, `http://localhost:8080/`, ne convient pas.
+4. Collez l'identifiant et le secret **directement dans `.env`** (`APS_CLIENT_ID`, `APS_CLIENT_SECRET`), définissez `APP_SECRET`, puis redémarrez le serveur : il ne relit `.env` qu'au démarrage.
+5. Vérifiez :
+   ```bash
+   python scripts/check_login_setup.py
+   ```
+   Le script ne modifie rien. Il contrôle `.env`, demande à Autodesk si l'URL de rappel est bien déclarée (et affiche celle qui l'est sinon), et liste les comptes ShotGrid qui ne pourront pas se connecter (sans e-mail valide, ou adresse partagée par plusieurs comptes actifs) ainsi que ce que verra chaque groupe.
+
+Le secret Autodesk donne le droit d'agir au nom de l'application : ne le collez jamais dans un e-mail ou une conversation. S'il a circulé, régénérez-le dans les réglages de l'application et remplacez-le dans `.env`.
+
+Pour que plusieurs personnes l'utilisent, l'application doit tourner sur une machine accessible par tous, en HTTPS (`APP_BASE_URL=https://…`).
+
+**Développement local sans Autodesk** : avec `APP_BASE_URL` sur `localhost` et `DEV_LOGIN_AS=<login ou e-mail ShotGrid>`, la page de connexion propose un bouton « Connexion de développement » qui ouvre une session au nom de cet utilisateur. Ce bouton n'existe jamais sur une autre adresse que `localhost`.
+
+---
+
 ## Architecture
 
 ```text
@@ -124,18 +175,22 @@ html_server/
 │   ├── context.py             # mise en forme des données pour le modèle
 │   ├── prompt.py              # prompt système de Lia
 │   ├── assistant.py           # endpoint de l'assistante (streaming)
-│   ├── auth.py                # Google OAuth (jetons stockés côté serveur)
+│   ├── users.py               # utilisateur connecté : compte ShotGrid, rôle, productions visibles, sessions
+│   ├── auth.py                # connexion Autodesk, contrôle d'accès, connexion Google Drive
 │   ├── api.py                 # API de lecture pour l'interface
 │   └── migrate_db.py          # migration / reconstruction manuelle
 ├── scripts/
-│   └── eval_assistant.py      # évaluation de Lia sur les vraies données
+│   ├── eval_assistant.py      # évaluation de Lia sur les vraies données
+│   └── check_login_setup.py   # vérifie que la connexion Autodesk est prête
+├── docs/
+│   └── connexion-autodesk.md  # guide de mise en service de la connexion
 ├── tests/                     # pytest, avec un faux client ShotGrid
 └── frontend/src/
-    ├── App.jsx                # structure, routage, thème, état de la synchronisation
+    ├── App.jsx                # barre du haut, routage, thème, état de la synchronisation
     ├── api.js / lib.js        # client HTTP, routeur, formatage
     ├── index.css              # système visuel
     ├── pages/                 # Overview, ProjectPage, PeoplePage, PersonPage, SyncPage
-    └── components/            # ui, TaskTable, SearchPalette, Assistant
+    └── components/            # ui (barres, statuts, vignettes), TaskTable, SearchPalette, Assistant
 ```
 
 ### Tables SQLite
@@ -147,7 +202,8 @@ html_server/
 | `shotgrid_fts` | Index plein texte (FTS5) des noms, descriptions et contenus de notes |
 | `entity_types` | Types synchronisés, nom lisible, nombre d'enregistrements, dates de synchronisation |
 | `sync_runs` | Historique des synchronisations |
-| `user_tokens` | Jetons Google OAuth (jamais stockés dans le cookie) |
+| `user_sessions` | Sessions ouvertes (le cookie ne contient qu'une clé aléatoire) |
+| `user_tokens` | Jetons Google Drive par session (jamais stockés dans le cookie) |
 
 ---
 
@@ -198,9 +254,15 @@ cp .env.example .env
 | `SYNC_ENTITIES` | `auto` (tous les types utiles) ou une liste : `Project,Shot,Task` | `auto` |
 | `SYNC_INTERVAL_MINUTES` | Intervalle de la synchronisation automatique (`0` la désactive) | `30` |
 | `FULL_SYNC_EVERY_HOURS` | Fréquence de la synchronisation complète | `24` |
-| `APP_SECRET` | Clé de signature des sessions. Sans elle, une clé aléatoire est générée et les sessions sont perdues à chaque redémarrage. | aléatoire |
+| `APP_SECRET` | Clé de signature des sessions. **Obligatoire en production** : sans elle, une clé aléatoire est générée et tout le monde est déconnecté à chaque redémarrage. | aléatoire |
 | `APP_BASE_URL` | Adresse publique de l'application | `http://localhost:8000` |
-| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_REDIRECT_URI` | Optionnel : recherche de fichiers Google Drive par Lia | — |
+| `APS_CLIENT_ID` / `APS_CLIENT_SECRET` | Application Autodesk pour la connexion (voir *Connexion et droits*) | — |
+| `APS_CALLBACK_URL` | URL de rappel, si elle diffère de `APP_BASE_URL/auth/autodesk/callback` | — |
+| `SESSION_DAYS` | Durée d'une session | `7` |
+| `ROLES_SEE_ALL` | Groupes ShotGrid qui voient toutes les productions | `Admin,Admin Copy,Manager,Supervisor,Audit - Conseil` |
+| `ADMIN_ROLES` | Groupes qui gèrent la synchronisation | `Admin,Admin Copy` |
+| `DEV_LOGIN_AS` | Développement local uniquement : login ou e-mail ShotGrid à utiliser sans Autodesk | — |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_REDIRECT_URI` | Optionnel : permet à chacun de connecter son Google Drive pour que Lia y cherche des fichiers | — |
 | `DATABASE_PATH` | Emplacement de la base SQLite | `dashboard.sqlite3` |
 
 Le fichier `.env` et la base `dashboard.sqlite3` sont exclus de Git : ne les partagez pas.
@@ -213,7 +275,7 @@ Le fichier `.env` et la base `dashboard.sqlite3` sont exclus de Git : ne les par
 python -m uvicorn backend.main:app --port 8000
 ```
 
-Puis ouvrez **http://localhost:8000**. FastAPI sert l'interface compilée. Une première synchronisation démarre automatiquement après quelques secondes.
+Puis ouvrez **http://localhost:8000** et connectez-vous. FastAPI sert l'interface compilée. Une première synchronisation démarre automatiquement après quelques secondes.
 
 ### Développement de l'interface (rechargement à chaud)
 
@@ -237,7 +299,7 @@ Ouvrez **http://localhost:5173** : les appels `/api` et `/auth` sont redirigés 
 ## Synchronisation avec ShotGrid
 
 - **Automatique** : au démarrage, puis toutes les `SYNC_INTERVAL_MINUTES`. La synchronisation est *incrémentale* : elle récupère les enregistrements modifiés depuis la dernière fois (`updated_at`) et applique les suppressions lues dans le journal d'événements ShotGrid. Une synchronisation *complète* a lieu quand la dernière date de plus de `FULL_SYNC_EVERY_HOURS`.
-- **Manuelle** : bouton en haut de l'écran, ou page *Synchronisation* (« Synchroniser les changements », « Synchronisation complète »).
+- **Manuelle** : icône de synchronisation dans la barre du haut, ou page *Synchronisation* (« Synchroniser les changements », « Synchronisation complète »).
 - **Types synchronisés** : avec `SYNC_ENTITIES=auto`, tous les types ShotGrid qui contiennent des données, sauf les types techniques (journaux, pages, permissions…). Cela inclut tâches, plans, séquences, étapes, assets, versions, notes et réponses, playlists, temps saisis, fichiers, dépendances et les entités personnalisées du site.
 - **Fiabilité** : chaque type est enregistré en une seule transaction ; les enregistrements supprimés dans ShotGrid sont retirés ; une réponse vide de ShotGrid n'efface jamais la copie locale ; une synchronisation interrompue ne bloque pas les suivantes.
 - **Vérification** : « Comparer avec ShotGrid » (page *Synchronisation*) ou `GET /api/sync/audit` compare chaque type, enregistrement par enregistrement, et signale les écarts.
@@ -259,11 +321,11 @@ python -m pip install -r requirements-dev.txt
 python -m pytest tests
 ```
 
-Ils couvrent la synchronisation (complète, incrémentale, suppressions, migration), l'analyse des questions, la mise en forme du contexte et l'API, avec un faux client ShotGrid. Ils ne nécessitent ni ShotGrid ni Ollama.
+Ils couvrent la synchronisation (complète, incrémentale, suppressions, migration), l'analyse des questions, la mise en forme du contexte, l'API, la connexion et le cloisonnement des données entre utilisateurs (y compris pour Lia), avec un faux client ShotGrid. Ils ne nécessitent ni ShotGrid, ni Autodesk, ni Ollama.
 
 ### Évaluation de Lia sur les vraies données
 
-`scripts/eval_assistant.py` pose une série de questions à Lia via le serveur en cours d'exécution. Il vérifie chaque réponse contre des faits calculés dans la base locale : nombre de productions actives, tâches en retard, classements, questions de suite, noms avec fautes de frappe, refus d'inventer un budget ou un réalisateur.
+`scripts/eval_assistant.py` pose une série de questions à Lia via le serveur en cours d'exécution, connecté avec `DEV_LOGIN_AS` (un compte qui voit toutes les productions). Il vérifie chaque réponse contre des faits calculés dans la base locale : nombre de productions actives, tâches en retard, classements, questions de suite, noms avec fautes de frappe, refus d'inventer un budget ou un réalisateur.
 
 ```bash
 python scripts/eval_assistant.py --model llama3.1:latest
@@ -278,21 +340,24 @@ Relancez-le après toute modification du prompt (`backend/prompt.py`), de la mis
 
 | Méthode | Route | Description |
 |---|---|---|
+| | | Toutes les routes `/api` (sauf `/api/me`) exigent une session et ne renvoient que les données visibles par l'utilisateur. |
 | `GET` | `/api/dashboard` | Productions avec avancement, retards et activité ; totaux ; dernières notes |
 | `GET` | `/api/projects/{id}` | Synthèse d'une production : étapes, séquences, retards, blocages, équipe |
-| `GET` | `/api/records/{EntityType}` | Liste filtrée : `project_id`, `sequence_id`, `step_id`, `person_id`, `bucket`, `late`, `blocked`, `search`, `sort`, `page`, `limit` |
+| `GET` | `/api/records/{EntityType}` | Liste filtrée : `project_id`, `sequence_id`, `step_id`, `person_id`, `bucket` (`open`, `waiting`, `in_progress`, `review`, `done`), `late`, `blocked`, `search`, `sort`, `page`, `limit` |
 | `GET` | `/api/people`, `/api/people/{id}` | Charge par personne, tâches d'une personne |
 | `GET` | `/api/search?q=` | Recherche plein texte globale |
 | `GET` | `/api/thumbnails?entity_type=&ids=` | Liens de vignettes à jour (ceux de ShotGrid expirent) |
 | `GET` | `/api/statuses`, `/api/entity-types` | Noms des statuts, types synchronisés |
-| `POST` | `/api/sync?mode=auto\|full\|incremental` | Lance une synchronisation |
+| `POST` | `/api/sync?mode=auto\|full\|incremental` | Lance une synchronisation (administrateurs) |
 | `GET` | `/api/sync/status`, `/api/sync/runs` | Dernière synchronisation, historique |
-| `GET` | `/api/sync/audit?include_unsynced=true` | Comparaison en direct ShotGrid ↔ copie locale |
+| `GET` | `/api/sync/audit?include_unsynced=true` | Comparaison en direct ShotGrid ↔ copie locale (administrateurs) |
 | `GET` | `/api/models` | Modèles Ollama disponibles |
 | `POST` | `/api/query/stream` | Lia, réponse en streaming (SSE) |
-| `GET` | `/auth/google/login`, `/auth/google/callback` | Connexion Google (optionnelle) |
+| `GET` | `/auth/autodesk/login`, `/auth/autodesk/callback` | Connexion avec le compte Autodesk |
+| `GET` | `/auth/dev-login` | Connexion de développement (localhost et `DEV_LOGIN_AS` uniquement) |
 | `POST` | `/auth/logout` | Déconnexion |
-| `GET` | `/api/me` | Session en cours |
+| `GET` | `/api/me` | Utilisateur connecté (nom, rôle, productions) ou options de connexion |
+| `GET` | `/auth/google/login`, `/auth/google/callback` | Connexion de son Google Drive pour Lia (optionnelle) |
 
 ---
 
@@ -323,7 +388,19 @@ Lancez le serveur avec le même Python que celui qui a installé les dépendance
 **Erreurs SQLite après une mise à jour**
 Arrêtez tout ancien serveur encore lancé : une ancienne version du code n'est pas compatible avec le nouveau schéma. Redémarrez ensuite le serveur, qui migre la base automatiquement.
 
-**Vous êtes déconnecté de Google à chaque redémarrage**
+**Pas de bouton « Se connecter avec Autodesk »**
+`APS_CLIENT_ID` ou `APS_CLIENT_SECRET` est vide, ou le serveur n'a pas été redémarré depuis la modification de `.env`. Si le redémarrage échoue avec « address already in use » (`[Errno 10048]` sous Windows), une ancienne instance occupe encore le port 8000 : arrêtez-la (`Ctrl + C` dans son terminal) avant de relancer.
+
+**Autodesk affiche « Request error — There was a problem opening this page. »**
+L'URL de rappel n'est pas déclarée dans l'application Autodesk. Lancez `python scripts/check_login_setup.py`, qui affiche l'URL déclarée et celle attendue, puis ajoutez la bonne dans *Callback URL* sur aps.autodesk.com. Pas besoin de redémarrer MedIAData.
+
+**« Aucun utilisateur ShotGrid ne correspond à … » à la connexion**
+Le compte Autodesk utilisé n'a pas la même adresse e-mail qu'un utilisateur ShotGrid actif. Connectez-vous avec le compte Autodesk lié à ShotGrid, ou demandez à un administrateur de corriger l'adresse dans ShotGrid (puis attendez la synchronisation suivante).
+
+**Une personne ne voit pas une production**
+Elle n'est pas membre de cette production dans ShotGrid et son groupe n'est pas dans `ROLES_SEE_ALL`. Ajoutez-la à l'équipe de la production dans ShotGrid, ou ajoutez son groupe à `ROLES_SEE_ALL`.
+
+**Tout le monde est déconnecté à chaque redémarrage**
 Définissez `APP_SECRET` dans `.env`.
 
 **L'interface ne reflète pas les dernières modifications**

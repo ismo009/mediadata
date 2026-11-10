@@ -38,7 +38,7 @@ export default function SyncPage() {
   return (
     <div className="page">
       <h1 className="display h1" style={{ marginBottom: 6 }}>Synchronisation</h1>
-      <p className="headline-sub">
+      <p className="lede">
         Les données affichées viennent d'une copie locale de ShotGrid. Une synchronisation incrémentale récupère seulement ce qui a changé ;
         une synchronisation complète revérifie chaque enregistrement et retire ceux supprimés dans ShotGrid.
       </p>

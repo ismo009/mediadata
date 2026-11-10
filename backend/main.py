@@ -8,7 +8,8 @@ Modules:
     sync       full/incremental sync, scheduler, audit
     retrieval  question -> scoped records + exact stats (assistant)
     assistant  streamed assistant endpoint
-    auth       Google OAuth
+    users      signed-in users: ShotGrid identity, role, visible productions, sessions
+    auth       sign-in with Autodesk, access dependencies, Google Drive connection
     api        read API for the UI
 """
 import asyncio
@@ -50,6 +51,7 @@ app.add_middleware(
     secret_key=config.settings.app_secret,
     same_site="lax",
     https_only=config.settings.app_base_url.startswith("https://"),
+    max_age=config.settings.session_days * 86400,
 )
 app.add_middleware(
     CORSMiddleware,

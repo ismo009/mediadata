@@ -150,10 +150,15 @@ def stats_lines(stats: dict[str, Any], labels: dict[str, dict]) -> list[str]:
 
 
 def render_context(found: dict[str, Any], labels: dict[str, dict], drive: list[dict],
-                   today: Optional[date] = None, long_text: bool = False) -> str:
+                   today: Optional[date] = None, long_text: bool = False, user=None) -> str:
     today = today or date.today()
-    out = [f"DATE DU JOUR : {fr_date(today.isoformat())}",
-           f"RECHERCHE EFFECTUÉE : {found['scope']}", ""]
+    out = [f"DATE DU JOUR : {fr_date(today.isoformat())}"]
+    if user is not None:
+        access = ("toutes les productions" if user.sees_all
+                  else "uniquement les productions dont cette personne est membre")
+        out.append(f"UTILISATEUR CONNECTÉ : {user.name} ({user.role or 'sans rôle'}) ; "
+                   f"données visibles : {access}")
+    out += [f"RECHERCHE EFFECTUÉE : {found['scope']}", ""]
 
     stats = found.get("stats")
     if stats:

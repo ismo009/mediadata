@@ -1,5 +1,11 @@
+/* A 401 anywhere means the session ended: the app shows the sign-in page again. */
+function checkAuth(res) {
+  if (res.status === 401) window.dispatchEvent(new Event("auth-required"));
+}
+
 async function getJSON(url) {
   const res = await fetch(url);
+  checkAuth(res);
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
     throw new Error(data.detail || `Erreur HTTP ${res.status}`);
@@ -17,6 +23,8 @@ function qs(params) {
 }
 
 export const api = {
+  me: () => getJSON("/api/me"),
+  logout: () => fetch("/auth/logout", { method: "POST" }),
   dashboard: () => getJSON("/api/dashboard"),
   project: (id) => getJSON(`/api/projects/${id}`),
   records: (entityType, params = {}) => getJSON(`/api/records/${entityType}${qs(params)}`),
@@ -26,12 +34,12 @@ export const api = {
   statuses: () => getJSON("/api/statuses"),
   entityTypes: () => getJSON("/api/entity-types"),
   models: () => getJSON("/api/models").catch(() => ({ models: [], default: "" })),
-  me: () => getJSON("/api/me").catch(() => ({ authenticated: false })),
   syncStatus: () => getJSON("/api/sync/status"),
   syncRuns: () => getJSON("/api/sync/runs"),
   syncAudit: (includeUnsynced) => getJSON(`/api/sync/audit${qs({ include_unsynced: includeUnsynced })}`),
   async startSync(mode = "auto") {
     const res = await fetch(`/api/sync${qs({ mode })}`, { method: "POST" });
+    checkAuth(res);
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
       throw new Error(data.detail || `Erreur HTTP ${res.status}`);
@@ -74,6 +82,7 @@ export function streamChat({ question, history, model, onSources, onToken, onErr
     signal: controller.signal,
   })
     .then(async (response) => {
+      checkAuth(response);
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
         throw new Error(data.detail || `Erreur HTTP ${response.status}`);

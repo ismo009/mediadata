@@ -2,26 +2,37 @@ import React from "react";
 import { Search } from "lucide-react";
 import { api } from "../api";
 import { useApp } from "../App";
-import { daysLate, fmtDate, href, linkName, linkNames, num, taskName, useData } from "../lib";
+import { daysLate, fmtDate, href, linkName, num, taskName, useData } from "../lib";
 import { Empty, ErrorBox, LateChip, LoadingRows, SgLink, Status } from "./ui";
 
-const BUCKET_FILTERS = [
-  { key: "", label: "Tous" },
+const STATE_FILTERS = [
+  { key: "open", label: "Non terminées" },
+  { key: "all", label: "Tous les états" },
+  { key: "late", label: "En retard" },
+  { key: "blocked", label: "Bloquées" },
   { key: "waiting", label: "En attente" },
   { key: "in_progress", label: "En cours" },
   { key: "review", label: "En review" },
-  { key: "done", label: "Terminé" },
+  { key: "done", label: "Terminées" },
 ];
 
+/* Current state filter: the late/blocked flags win, then the bucket; default = not finished. */
+function stateOf(query) {
+  if (query.late === "1") return "late";
+  if (query.blocked === "1") return "blocked";
+  return query.bucket || "open";
+}
+
 /* Filterable, paginated task table. Filters live in `query` (URL) and change via `setQuery`. */
-export default function TaskTable({ base, query, setQuery, steps = [], people = [], showProject = false }) {
+export default function TaskTable({ base, query, setQuery, steps = [], people = [], showProject = false,
+  emptyText = "Aucune tâche ne correspond à ces filtres." }) {
   const { labels } = useApp();
   const page = Number(query.page || 1);
   const params = {
     ...base,
     step_id: query.step,
-    person_id: query.person,
-    bucket: query.bucket,
+    person_id: query.person || base.person_id,
+    bucket: ["late", "blocked", "all"].includes(stateOf(query)) ? undefined : stateOf(query),
     late: query.late === "1",
     blocked: query.blocked === "1",
     search: query.q,
@@ -62,27 +73,22 @@ export default function TaskTable({ base, query, setQuery, steps = [], people = 
             ))}
           </select>
         )}
+        <select
+          className="select"
+          value={stateOf(query)}
+          onChange={(e) => {
+            const v = e.target.value;
+            set({ late: v === "late" ? "1" : "", blocked: v === "blocked" ? "1" : "", bucket: v === "open" ? "" : v });
+          }}
+          aria-label="État"
+        >
+          {STATE_FILTERS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+        </select>
         <select className="select" value={query.sort || "due"} onChange={(e) => set({ sort: e.target.value })} aria-label="Trier">
           <option value="due">Par échéance</option>
           <option value="updated">Dernières modifiées</option>
           <option value="name">Par nom</option>
         </select>
-      </div>
-      <div className="toolbar">
-        <div className="segmented" role="group" aria-label="Statut">
-          {BUCKET_FILTERS.map((b) => (
-            <button key={b.key} aria-pressed={(query.bucket || "") === b.key} onClick={() => set({ bucket: b.key })}>
-              {b.key && <i className={`dot ${b.key}`} />}
-              {b.label}
-            </button>
-          ))}
-        </div>
-        <button className="btn" aria-pressed={query.late === "1"} onClick={() => set({ late: query.late === "1" ? "" : "1" })}>
-          En retard
-        </button>
-        <button className="btn" aria-pressed={query.blocked === "1"} onClick={() => set({ blocked: query.blocked === "1" ? "" : "1" })}>
-          Bloquées
-        </button>
       </div>
 
       {error ? (
@@ -90,7 +96,7 @@ export default function TaskTable({ base, query, setQuery, steps = [], people = 
       ) : !data ? (
         <LoadingRows />
       ) : !data.records.length ? (
-        <Empty>Aucune tâche ne correspond à ces filtres.</Empty>
+        <Empty>{emptyText}</Empty>
       ) : (
         <>
           <div className="table-wrap" style={{ opacity: loading ? 0.6 : 1 }}>
@@ -119,15 +125,7 @@ export default function TaskTable({ base, query, setQuery, steps = [], people = 
                     <td className="muted">{linkName(t.entity)}</td>
                     <td className="muted hide-mobile">{linkName(t.step)}</td>
                     <td className="muted hide-mobile">
-                      {linkNames(t.task_assignees).map((n, i) => {
-                        const p = t.task_assignees[i];
-                        return (
-                          <span key={i}>
-                            {i > 0 && ", "}
-                            {p?.type === "HumanUser" ? <a href={href(`/people/${p.id}`)}>{n}</a> : n}
-                          </span>
-                        );
-                      })}
+                      <Assignees list={t.task_assignees} />
                     </td>
                     <td><Status code={t.sg_status_list} labels={labels} /></td>
                     <td>
@@ -150,5 +148,19 @@ export default function TaskTable({ base, query, setQuery, steps = [], people = 
         </>
       )}
     </div>
+  );
+}
+
+
+/* First assignee as a link, the others summarised as "+N" (full list in the tooltip). */
+function Assignees({ list }) {
+  const people = (list || []).filter((p) => p && typeof p === "object");
+  if (!people.length) return <span className="faint">Non assignée</span>;
+  const [first, ...rest] = people;
+  return (
+    <span title={people.map(linkName).join(", ")}>
+      {first.type === "HumanUser" ? <a href={href(`/people/${first.id}`)}>{linkName(first)}</a> : linkName(first)}
+      {rest.length > 0 && <span className="faint"> +{rest.length}</span>}
+    </span>
   );
 }

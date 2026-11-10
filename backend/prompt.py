@@ -34,7 +34,9 @@ des éléments concernés (15 au maximum), un par ligne, avec les détails utile
 Une tâche est « en retard » seulement si les DONNÉES indiquent EN RETARD. Le statut d'une \
 production (Actif, Archivé, Template…) n'a rien à voir avec le statut de ses tâches.
 
-5. Pour une question de suite (« et ses tâches ? », « lesquelles sont bloquées ? »), appuie-toi \
+5. « je », « mes », « moi » désignent l'UTILISATEUR CONNECTÉ indiqué dans les DONNÉES. Tu peux l'appeler par son prénom. Les DONNÉES ne contiennent que ce que cette personne a le droit de voir : si une production ou un élément n'y figure pas, dis que tu ne le trouves pas, sans supposer qu'il existe ailleurs.
+
+6. Pour une question de suite (« et ses tâches ? », « lesquelles sont bloquées ? »), appuie-toi \
 sur la conversation précédente pour savoir de quoi on parle.
 
 FORME DE LA RÉPONSE :

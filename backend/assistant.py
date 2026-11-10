@@ -5,15 +5,16 @@ import re
 from typing import Any, AsyncGenerator, Optional
 
 import httpx
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from backend import config
 from backend.api import status_labels
-from backend.auth import google_access_token
+from backend.auth import google_access_token, require_user
 from backend.context import render_context
 from backend.prompt import SYSTEM_PROMPT
+from backend.users import User
 from backend.retrieval import STOP_WORDS, normalize, retrieve, subject_names
 
 router = APIRouter()
@@ -25,72 +26,11 @@ class QueryRequest(BaseModel):
     model: Optional[str] = None
 
 
-def _name(value: Any) -> Optional[str]:
-    if isinstance(value, dict):
-        return value.get("name") or value.get("code")
-    return value if isinstance(value, str) else None
-
-
-def _names(value: Any) -> list[str]:
-    if isinstance(value, list):
-        return [n for n in (_name(v) for v in value) if n]
-    single = _name(value)
-    return [single] if single else []
-
-
-def compact_record_for_llm(record: dict[str, Any], entity_type: str, long_text: bool = False) -> dict[str, Any]:
-    """Keep only the business fields of a record, to fit many records in the context window."""
-    compact: dict[str, Any] = {"type": entity_type, "id": record.get("id")}
-    if entity_type == "Task":
-        compact["name"] = record.get("content") or record.get("name")
-    else:
-        compact["name"] = (record.get("name") or record.get("code") or record.get("subject")
-                           or record.get("cached_display_name"))
-
-    if entity_type == "Project":
-        compact["status"] = record.get("status_label")
-        compact["is_active"] = record.get("is_active")
-    else:
-        status = record.get("sg_status_list") or record.get("sg_status")
-        if status:
-            compact["status"] = status
-        if record.get("project"):
-            compact["project"] = _name(record["project"])
-
-    for key, label in (("step", "step"), ("entity", "entity"), ("sg_sequence", "sequence"),
-                       ("user", "user")):
-        if record.get(key):
-            compact[label] = _name(record[key])
-    for key, label in (("task_assignees", "assigned_to"), ("note_links", "links"),
-                       ("addressings_to", "to")):
-        names = _names(record.get(key))
-        if names:
-            compact[label] = names
-
-    text_limit = 1500 if long_text else 400
-    if entity_type != "Task" and record.get("content"):
-        compact["content"] = str(record["content"])[:text_limit]
-    if record.get("subject") and compact.get("name") != record["subject"]:
-        compact["subject"] = record["subject"]
-    for key in ("description", "sg_description"):
-        if record.get(key):
-            compact["description"] = str(record[key])[:300]
-            break
-
-    for key in ("start_date", "due_date", "end_date", "date"):
-        if record.get(key):
-            compact[key] = record[key]
-    if entity_type in ("Note", "Version", "Reply") and record.get("created_at"):
-        compact["created_at"] = str(record["created_at"])[:16]
-    if entity_type == "TimeLog" and isinstance(record.get("duration"), (int, float)):
-        compact["duration_hours"] = round(record["duration"] / 60, 2)
-    if record.get("late"):
-        compact["late"] = True
-    if record.get("blocked_by"):
-        compact["blocked_by"] = record["blocked_by"]
-    if record.get("source_url"):
-        compact["source_url"] = record["source_url"]
-    return compact
+def source_item(record: dict[str, Any]) -> dict[str, Any]:
+    """What the UI's source list needs for one record: type, id, display name, ShotGrid link."""
+    kind = record.get("entity_type") or record.get("type")
+    name = (record.get("content") if kind == "Task" else None) or record.get("name") or record.get("code")         or record.get("subject") or record.get("cached_display_name")
+    return {"type": kind, "id": record.get("id"), "name": name, "source_url": record.get("source_url")}
 
 
 async def search_drive(access_token: Optional[str], question: str) -> list[dict[str, Any]]:
@@ -129,19 +69,8 @@ async def list_models() -> dict[str, Any]:
 
 
 @router.get("/api/models")
-async def models() -> dict[str, Any]:
+async def models(_user: User = Depends(require_user)) -> dict[str, Any]:
     return await list_models()
-
-
-def _stat_codes(stats: Any) -> list[str]:
-    """Every status code mentioned in a (possibly nested) stats dict."""
-    if not isinstance(stats, dict):
-        return []
-    codes = list((stats.get("par_statut") or {}).keys())
-    for value in stats.values():
-        if isinstance(value, dict) and "par_statut" in value:
-            codes += list(value["par_statut"].keys())
-    return codes
 
 
 HISTORY_MESSAGES = 6
@@ -168,7 +97,7 @@ def build_messages(payload: QueryRequest, context: str) -> list[dict[str, str]]:
 FOLLOW_UP_MAX_WORDS = 10
 
 
-def retrieval_question(payload: QueryRequest) -> str:
+def retrieval_question(payload: QueryRequest, user=None) -> str:
     """Follow-ups inherit their subject from the conversation.
 
     "et combien sont en retard ?" after "Où en est Les Cocottes en Papier ?" is searched as
@@ -176,34 +105,30 @@ def retrieval_question(payload: QueryRequest) -> str:
     sequence, person) is carried over, not the previous filters.
     """
     question = payload.question.strip()
-    if not payload.history or len(question.split()) > FOLLOW_UP_MAX_WORDS or subject_names(question):
+    if not payload.history or len(question.split()) > FOLLOW_UP_MAX_WORDS or subject_names(question, user):
         return question
     for message in reversed(payload.history):
         if message.get("role") == "user":
-            names = subject_names(str(message.get("content", "")))
+            names = subject_names(str(message.get("content", "")), user)
             if names:
                 return f"{question} {' '.join(names)}"
     return question
 
 
 @router.post("/api/query/stream")
-async def query_stream(request: Request, payload: QueryRequest):
-    search_q = retrieval_question(payload)
+async def query_stream(request: Request, payload: QueryRequest, user: User = Depends(require_user)):
+    search_q = retrieval_question(payload, user)
     found, drive = await asyncio.gather(
-        asyncio.to_thread(retrieve, search_q),
+        asyncio.to_thread(retrieve, search_q, user=user),
         search_drive(google_access_token(request), payload.question),
     )
     long_text = bool(re.search(r"\b(notes?|retours?|feedbacks?)\b", normalize(search_q)))
-    shotgrid_records = [
-        compact_record_for_llm(r, r.get("entity_type", "Unknown"), long_text) for r in found["records"]
-    ]
-    used_codes = {r.get("status") for r in shotgrid_records} | set(_stat_codes(found["stats"]))
     labels = await asyncio.to_thread(status_labels)
+    # Sent to the UI for the "sources" list under the answer.
     sources = {
         "scope": found["scope"],
         "stats": found["stats"],
-        "status_labels": {code: v["name"] for code, v in labels.items() if code in used_codes},
-        "shotgrid": shotgrid_records,
+        "shotgrid": [source_item(r) for r in found["records"]],
         "google_drive": drive,
     }
 
@@ -214,7 +139,7 @@ async def query_stream(request: Request, payload: QueryRequest):
             raise HTTPException(status_code=503, detail="Aucun modèle Ollama disponible.")
         model = available[0]
 
-    context = render_context(found, labels, drive, long_text=long_text)
+    context = render_context(found, labels, drive, long_text=long_text, user=user)
     messages = build_messages(payload, context)
 
     async def event_generator() -> AsyncGenerator[str, None]:

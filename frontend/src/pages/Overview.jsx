@@ -1,107 +1,105 @@
 import React, { useState } from "react";
+import { Search } from "lucide-react";
 import { useApp } from "../App";
-import { href, linkName, num, plural, relTime } from "../lib";
-import { ErrorBox, LateChip, Legend, LoadingRows, StatusBar } from "../components/ui";
+import { href, num, plural, relTime } from "../lib";
+import { ErrorBox, LateChip } from "../components/ui";
 
-const SORTS = [
-  { key: "late", label: "Retard" },
-  { key: "activity", label: "Activité" },
-  { key: "name", label: "Nom" },
-];
+const SORTS = {
+  activity: { label: "Activité récente", fn: (a, b) => (b.last_activity || "").localeCompare(a.last_activity || "") },
+  late: { label: "Les plus en retard", fn: (a, b) => b.tasks_late - a.tasks_late || a.name.localeCompare(b.name, "fr") },
+  name: { label: "Nom", fn: (a, b) => a.name.localeCompare(b.name, "fr") },
+};
+
+function progress(p) {
+  return p.tasks_total ? Math.round((p.tasks.done / p.tasks_total) * 100) : null;
+}
 
 export default function Overview() {
-  const { dashboard } = useApp();
-  const [sort, setSort] = useState("late");
-  const [scope, setScope] = useState("active");
+  const { dashboard, me } = useApp();
+  const mine = new Set(me.projects);
+  const [filter, setFilter] = useState("");
+  const [scope, setScope] = useState(mine.size ? "mine" : "active");
+  const [sort, setSort] = useState("activity");
 
-  if (dashboard.error && !dashboard.data) return <div className="page"><ErrorBox error={dashboard.error} onRetry={dashboard.reload} /></div>;
+  if (dashboard.error && !dashboard.data) {
+    return <div className="page"><ErrorBox error={dashboard.error} onRetry={dashboard.reload} /></div>;
+  }
   const d = dashboard.data;
-
   const projects = (d?.projects || [])
-    .filter((p) => (scope === "active" ? p.is_active : true))
-    .filter((p) => scope !== "active" || p.tasks_total > 0 || p.shots_total > 0)
-    .sort((a, b) => {
-      if (sort === "late") return b.tasks_late - a.tasks_late || (b.last_activity || "").localeCompare(a.last_activity || "");
-      if (sort === "activity") return (b.last_activity || "").localeCompare(a.last_activity || "");
-      return a.name.localeCompare(b.name, "fr");
-    });
-  const slipping = (d?.projects || []).filter((p) => p.is_active && p.tasks_late > 0);
+    .filter((p) => (scope === "mine" ? mine.has(p.id) : scope === "active" ? p.is_active && p.tasks_total > 0 : true))
+    .filter((p) => !filter || p.name.toLowerCase().includes(filter.toLowerCase()))
+    .sort(SORTS[sort].fn);
 
   return (
     <div className="page">
+      <div className="page-head">
+        <div>
+          <h1 className="display h1">Productions</h1>
+          {d && (
+            <p className="muted" style={{ margin: "6px 0 0" }}>
+              {scope === "mine"
+                ? plural(projects.length, "production dont vous êtes membre", "productions dont vous êtes membre")
+                : scope === "active"
+                ? plural(projects.length, "production en cours", "productions en cours")
+                : plural(d.projects_total, "production visible", "productions visibles")}
+            </p>
+          )}
+        </div>
+      </div>
+
+      <div className="toolbar">
+        <div className="search-field grow">
+          <Search size={14} />
+          <input className="input" placeholder="Rechercher une production…" value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="Rechercher une production" />
+        </div>
+        <select className="select" value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Trier">
+          {Object.entries(SORTS).map(([k, s]) => <option key={k} value={k}>{s.label}</option>)}
+        </select>
+        <div className="segmented" role="group" aria-label="Productions affichées">
+          {mine.size > 0 && <button aria-pressed={scope === "mine"} onClick={() => setScope("mine")}>Mes productions</button>}
+          <button aria-pressed={scope === "active"} onClick={() => setScope("active")}>En cours</button>
+          <button aria-pressed={scope === "all"} onClick={() => setScope("all")}>Toutes</button>
+        </div>
+      </div>
+
       {!d ? (
-        <LoadingRows rows={10} />
+        <div className="card-grid" aria-busy="true">
+          {Array.from({ length: 9 }, (_, i) => <div key={i} className="skeleton" style={{ height: 118, borderRadius: 10 }} />)}
+        </div>
+      ) : !projects.length ? (
+        <p className="muted">
+          {filter ? `Aucune production ne correspond à « ${filter} ».` : "Aucune production à afficher ici."}
+        </p>
       ) : (
-        <>
-          <h1 className="display h1 headline">
-            {d.tasks_late
-              ? `${plural(d.tasks_late, "tâche en retard", "tâches en retard")} sur ${plural(slipping.length, "production", "productions")}`
-              : "Aucune tâche en retard"}
-          </h1>
-          <p className="headline-sub">
-            {plural(d.projects_active, "production active", "productions actives")}, {num(d.tasks_review)} tâches attendent une validation et{" "}
-            {num(d.shots_total)} plans sont suivis dans ShotGrid.
-          </p>
-
-          <div className="overview">
-            <section aria-labelledby="strips-title">
-              <div className="strips-head">
-                <h2 id="strips-title" className="h3">Avancement des tâches par production</h2>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <div className="segmented" role="group" aria-label="Productions affichées">
-                    <button aria-pressed={scope === "active"} onClick={() => setScope("active")}>Actives</button>
-                    <button aria-pressed={scope === "all"} onClick={() => setScope("all")}>Toutes</button>
-                  </div>
-                  <div className="segmented" role="group" aria-label="Trier par">
-                    {SORTS.map((s) => (
-                      <button key={s.key} aria-pressed={sort === s.key} onClick={() => setSort(s.key)}>{s.label}</button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-              <div style={{ padding: "10px 0 4px" }}><Legend /></div>
-              {projects.map((p) => (
-                <a key={p.id} className="strip" href={href(`/projects/${p.id}`)}>
-                  <div style={{ minWidth: 0 }}>
-                    <div className="title">{p.name}</div>
-                    <div className="sub">
-                      {p.is_active ? "" : `${p.status_label} · `}
-                      {p.last_activity ? `Activité ${relTime(p.last_activity)}` : "Aucune activité"}
+        <div className="card-grid">
+          {projects.map((p) => {
+            const pct = progress(p);
+            return (
+              <a key={p.id} className="project-card" href={href(`/projects/${p.id}`)}>
+                <span className="title">{p.name}</span>
+                <span className="faint small">
+                  {!p.is_active ? `${p.status_label}, ` : ""}
+                  {p.last_activity ? `activité ${relTime(p.last_activity)}` : "aucune activité"}
+                </span>
+                {pct === null ? (
+                  <span className="faint small card-foot">Aucune tâche</span>
+                ) : (
+                  <>
+                    <div className="progress" role="img" aria-label={`${pct} % des tâches terminées`}>
+                      <div style={{ width: `${pct}%` }} />
                     </div>
-                  </div>
-                  <div className="sbar-cell"><StatusBar counts={p.tasks} /></div>
-                  <div className="figures">
-                    {p.tasks_late ? <LateChip count={p.tasks_late} compact /> : null}
-                    <div>{plural(p.tasks_total, "tâche", "tâches")}</div>
-                  </div>
-                </a>
-              ))}
-              {!projects.length && <p className="muted" style={{ padding: "16px 0" }}>Aucune production avec des tâches.</p>}
-            </section>
-
-            <aside aria-labelledby="notes-title">
-              <div className="strips-head">
-                <h2 id="notes-title" className="h3">Dernières notes</h2>
-              </div>
-              <div className="feed">
-                {d.recent_notes.map((n) => (
-                  <article key={n.id} className="feed-item">
-                    <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                      <a href={href(`/projects/${n.project?.id}/notes`)} style={{ fontWeight: 550, textDecoration: "none" }}>
-                        {n.subject || linkName(n.note_links?.[0]) || "Note"}
-                      </a>
-                      <span className="faint small">{relTime(n.created_at)}</span>
-                    </div>
-                    <div className="who">
-                      {linkName(n.user)} · {linkName(n.project)}
-                    </div>
-                    {n.content && <p>{n.content}</p>}
-                  </article>
-                ))}
-              </div>
-            </aside>
-          </div>
-        </>
+                    <span className="card-foot">
+                      <span className="small">
+                        <b>{pct} %</b> <span className="muted">de {num(p.tasks_total)} tâches</span>
+                      </span>
+                      {p.tasks_late > 0 && <LateChip count={p.tasks_late} />}
+                    </span>
+                  </>
+                )}
+              </a>
+            );
+          })}
+        </div>
       )}
     </div>
   );

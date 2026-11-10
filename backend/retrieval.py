@@ -95,6 +95,7 @@ class Scope:
     blocked: bool = False
     counting: bool = False
     keywords: list[str] = field(default_factory=list)
+    me: bool = False  # the question is about the signed-in user ("mes tâches")
 
     @property
     def structured(self) -> bool:
@@ -238,13 +239,29 @@ def _find_person(question: str, people: list[dict]) -> Optional[dict]:
     return hits[0] if len(hits) == 1 else None
 
 
-def parse_question(connection: sqlite3.Connection, question: str) -> Scope:
+ME_RE = (
+    r"\b(mes|mon|ma)\s+(taches?|plans?|notes?|productions?|projets?|retards?|versions?|assets?|"
+    r"echeances?|deadlines?|rendus?)\b"
+    r"|\b(je dois|j'?ai|ai-je|dois-je|pour moi|a moi|me reste|je travaille|suis-je|qui m'?attend)\b"
+)
+
+
+def _me(user) -> Optional[dict]:
+    """The signed-in user as a scope subject (None when there is no user)."""
+    if user is None:
+        return None
+    return {"id": user.id, "ids": [user.id], "name": user.name, "projects": set(user.member_projects)}
+
+
+def parse_question(connection: sqlite3.Connection, question: str, me: Optional[dict] = None) -> Scope:
     q = normalize(question)
     scope = Scope()
     scope.project = _find_named(q, _named(connection, "Project"))
     scope.sequence = _find_in(q, _named(connection, "Sequence"))
     scope.step = _find_in(q, _named(connection, "Step"), min_len=3)
     scope.person = _find_person(q, _named(connection, "HumanUser"))
+    if scope.person is None and me and re.search(ME_RE, q):
+        scope.person, scope.me = me, True
     for entity_type, pattern in TYPE_PATTERNS:
         if re.search(pattern, q):
             scope.entity_type = entity_type
@@ -445,9 +462,14 @@ def _fulltext(connection, keywords: list[str], limit: int, entity_type: Optional
 
 # --------------------------------------------------------------------------- entry point
 
-def retrieve(question: str, limit: int = RECORD_LIMIT) -> dict[str, Any]:
-    """Return {'scope': str, 'stats': dict|None, 'records': [...]} for a question."""
-    connection = database()
+def retrieve(question: str, limit: int = RECORD_LIMIT, user=None) -> dict[str, Any]:
+    """Return {'scope': str, 'stats': dict|None, 'records': [...]} for a question.
+
+    With a signed-in `user`, everything is read through that user's restricted connection:
+    names, records and statistics only ever cover what they may see in ShotGrid.
+    """
+    connection = database(user.visible_projects if user else None)
+    me = _me(user)
     try:
         q = normalize(question)
 
@@ -461,11 +483,28 @@ def retrieve(question: str, limit: int = RECORD_LIMIT) -> dict[str, Any]:
             if row:
                 return {"scope": f"note {note_id.group(1)}", "stats": None, "records": _rows_to_records([row])}
 
-        scope = parse_question(connection, question)
+        scope = parse_question(connection, question, me)
         ranking = bool(re.search(RANK_RE, q))
         if scope.counting:
             limit = min(limit, COUNTING_RECORD_LIMIT)
         mentions_projects = bool(re.search(PROJECTS_RE, q))
+
+        # "mes productions": the productions the user is a member of.
+        if mentions_projects and scope.me and scope.entity_type is None and not any(
+                [scope.project, scope.sequence, scope.step, scope.late, scope.blocked]):
+            rows = connection.execute(
+                "SELECT entity_type, data_json FROM shotgrid_records WHERE entity_type='Project' "
+                "ORDER BY name COLLATE NOCASE"
+            ).fetchall()
+            records = [r for r in _rows_to_records(rows) if r["id"] in me["projects"]]
+            _add_task_counts(connection, records)
+            return {
+                "scope": f"productions dont {me['name']} est membre",
+                "stats": {"entity_type": "Project", "total": len(records),
+                          "actifs": sum(1 for r in records if r.get("is_active")),
+                          "non_actifs": sum(1 for r in records if not r.get("is_active"))},
+                "records": records,
+            }
 
         # General question about projects as a collection ("quels sont les projets actifs ?").
         about_tasks_of_something = any([scope.project, scope.sequence, scope.step, scope.person,
@@ -576,11 +615,11 @@ def _add_task_counts(connection, projects: list[dict]) -> None:
         project["tasks_late"] = row["late"] if row else 0
 
 
-def subject_names(question: str) -> list[str]:
+def subject_names(question: str, user=None) -> list[str]:
     """Names of the production, sequence and person the question is about (if any)."""
-    connection = database()
+    connection = database(user.visible_projects if user else None)
     try:
-        scope = parse_question(connection, question)
+        scope = parse_question(connection, question, _me(user))
     finally:
         connection.close()
     return [x["name"] for x in (scope.project, scope.sequence, scope.person) if x]

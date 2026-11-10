@@ -19,7 +19,7 @@ export default function PeoplePage() {
   return (
     <div className="page">
       <h1 className="display h1" style={{ marginBottom: 6 }}>Équipe</h1>
-      <p className="headline-sub">Charge de travail ouverte par personne, toutes productions confondues.</p>
+      <p className="lede">Charge de travail ouverte par personne, toutes productions confondues.</p>
       <div className="toolbar">
         <div className="search-field grow">
           <Search size={14} />

@@ -112,11 +112,23 @@ def cases(f: dict) -> list[dict]:
     ]
 
 
+CLIENT: httpx.Client | None = None
+
+
+def sign_in(base: str) -> httpx.Client:
+    """The API requires a session: sign in through the localhost dev login (DEV_LOGIN_AS)."""
+    client = httpx.Client(base_url=base, timeout=600)
+    response = client.get("/auth/dev-login")
+    if response.status_code == 404 or not client.get("/api/me").json().get("authenticated"):
+        sys.exit("Connexion impossible : lancez le serveur avec DEV_LOGIN_AS=<login ShotGrid d'un Admin> "
+                 "et APP_BASE_URL sur localhost.")
+    return client
+
+
 def ask(base: str, question: str, model: str | None, history: list | None = None) -> tuple[str, float]:
     started = time.time()
     answer = []
-    with httpx.stream("POST", f"{base}/api/query/stream", json={"question": question, "history": history or [], "model": model},
-                      timeout=600) as response:
+    with CLIENT.stream("POST", "/api/query/stream", json={"question": question, "history": history or [], "model": model}) as response:
         for line in response.iter_lines():
             if not line.startswith("data: "):
                 continue
@@ -136,6 +148,8 @@ def main() -> None:
     parser.add_argument("--out", default="")
     args = parser.parse_args()
 
+    global CLIENT
+    CLIENT = sign_in(args.base)
     db = sqlite3.connect(f"file:{ROOT / 'dashboard.sqlite3'}?mode=ro", uri=True)
     all_cases = cases(facts(db))
     selected = {int(i) for i in args.only.split(",") if i} or set(range(1, len(all_cases) + 1))

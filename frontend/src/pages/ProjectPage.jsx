@@ -1,5 +1,5 @@
-import React from "react";
-import { ExternalLink } from "lucide-react";
+import React, { useState } from "react";
+import { ArrowLeft, ExternalLink } from "lucide-react";
 import { api } from "../api";
 import { useApp } from "../App";
 import { daysLate, fmtDate, href, linkName, linkNames, navigate, num, plural, recordName, relTime, taskName, useData } from "../lib";
@@ -7,12 +7,13 @@ import TaskTable from "../components/TaskTable";
 import { Empty, ErrorBox, LateChip, Legend, LoadingRows, SgLink, Status, StatusBar, Thumb } from "../components/ui";
 
 const TABS = [
-  { key: "summary", label: "Synthèse" },
+  { key: "summary", label: "Vue d'ensemble" },
   { key: "tasks", label: "Tâches", count: "Task" },
   { key: "shots", label: "Plans", count: "Shot" },
-  { key: "assets", label: "Assets", count: "Asset" },
+  { key: "team", label: "Équipe" },
   { key: "notes", label: "Notes", count: "Note" },
   { key: "versions", label: "Versions", count: "Version" },
+  { key: "assets", label: "Assets", count: "Asset" },
 ];
 
 export default function ProjectPage({ id, tab, query }) {
@@ -20,43 +21,41 @@ export default function ProjectPage({ id, tab, query }) {
   const setQuery = (q) => navigate(`/projects/${id}/${tab}`, q);
 
   if (details.error) return <div className="page"><ErrorBox error={details.error} onRetry={details.reload} /></div>;
-  if (!details.data) return <div className="page"><LoadingRows rows={12} /></div>;
+  if (!details.data) return <div className="page"><LoadingRows rows={10} /></div>;
   const d = details.data;
   const p = d.project;
-  const late = d.late_tasks.length;
+  const total = d.counts.Task || 0;
+  const pct = total ? Math.round((d.tasks.done / total) * 100) : null;
+  const tabs = TABS.filter((t) => !t.count || d.counts[t.count] || t.key === "tasks");
 
   return (
     <div className="page">
-      <div className="crumbs">
-        <a href="#/">Vue d'ensemble</a>
-        <span aria-hidden="true">/</span>
-        <span>Production</span>
-      </div>
+      <a className="back" href="#/"><ArrowLeft size={15} /> Productions</a>
+
       <div className="project-head">
-        <h1 className="display h1" style={{ maxWidth: "24ch" }}>{p.name}</h1>
+        <div>
+          <h1 className="display h1">{p.name}</h1>
+          <div className="facts">
+            <span className={`pill ${p.is_active ? "on" : ""}`}>{p.status_label}</span>
+            {p.end_date && <span>Fin prévue le {fmtDate(p.end_date)}</span>}
+          </div>
+        </div>
         {p.source_url && (
           <a className="btn" href={p.source_url} target="_blank" rel="noreferrer">
-            <ExternalLink size={14} /> Ouvrir dans ShotGrid
+            <ExternalLink size={14} /> ShotGrid
           </a>
         )}
       </div>
-      <div className="facts">
-        <span className={`pill ${p.is_active ? "on" : ""}`}>{p.status_label}</span>
-        {(p.start_date || p.end_date) && (
-          <span>
-            {p.start_date ? fmtDate(p.start_date) : "?"} → <b>{p.end_date ? fmtDate(p.end_date) : "sans date de fin"}</b>
-          </span>
-        )}
-        <span><b>{num(d.counts.Task || 0)}</b> tâches</span>
-        <span><b>{num(d.counts.Shot || 0)}</b> plans</span>
-        {d.hours_logged > 0 && <span><b>{num(d.hours_logged)} h</b> saisies</span>}
-        {late > 0 && <LateChip count={late >= 50 ? "50+" : late} />}
+
+      <div className="figures-row">
+        <Figure value={pct === null ? "—" : `${pct} %`} label="des tâches terminées" />
+        <Figure value={num(total)} label="tâches" />
+        <Figure value={d.late_tasks.length >= 50 ? "50+" : num(d.late_tasks.length)} label="en retard" alert={d.late_tasks.length > 0} />
+        <Figure value={num(d.counts.Shot || 0)} label="plans" />
       </div>
-      <StatusBar counts={d.tasks} size="thick" />
-      <div style={{ marginTop: 8 }}><Legend /></div>
 
       <nav className="tabs" aria-label="Sections de la production">
-        {TABS.map((t) => (
+        {tabs.map((t) => (
           <a key={t.key} className="tab" href={href(`/projects/${id}/${t.key === "summary" ? "" : t.key}`)} aria-current={tab === t.key ? "page" : undefined}>
             {t.label}
             {t.count && <span className="count">{num(d.counts[t.count] || 0)}</span>}
@@ -67,131 +66,114 @@ export default function ProjectPage({ id, tab, query }) {
       {tab === "summary" && <Summary d={d} id={id} />}
       {tab === "tasks" && <TaskTable base={{ project_id: id }} query={query} setQuery={setQuery} steps={d.steps} people={d.people} />}
       {tab === "shots" && <Shots d={d} id={id} query={query} setQuery={setQuery} />}
-      {tab === "assets" && <Gallery entityType="Asset" id={id} />}
+      {tab === "team" && <Team d={d} id={id} />}
       {tab === "notes" && <Notes id={id} />}
       {tab === "versions" && <Gallery entityType="Version" id={id} sort="recent" />}
+      {tab === "assets" && <Gallery entityType="Asset" id={id} />}
+    </div>
+  );
+}
+
+function Figure({ value, label, alert = false }) {
+  return (
+    <div className={`figure ${alert ? "alert" : ""}`}>
+      <span className="value">{value}</span>
+      <span className="label">{label}</span>
     </div>
   );
 }
 
 function Summary({ d, id }) {
   const { labels } = useApp();
+  const [showAllSteps, setShowAllSteps] = useState(false);
+  const watch = [
+    ...d.late_tasks.map((t) => ({ t, why: <LateChip days={daysLate(t.due_date)} /> })),
+    ...d.blocked_tasks
+      .filter((t) => !t.late)
+      .map((t) => ({ t, why: <span className="muted small">attend {linkNames(t.upstream_tasks).join(", ")}</span> })),
+  ];
+  const steps = showAllSteps ? d.steps : d.steps.slice(0, 6);
+
   return (
-    <div className="grid-2">
-      <div>
-        <section className="section">
-          <div className="section-head">
-            <h2 className="h3">Par étape</h2>
-            <span className="faint small">Cliquez une étape pour voir ses tâches</span>
+    <div className="stack">
+      <section>
+        <div className="section-head">
+          <h2 className="h3">À surveiller</h2>
+          {d.late_tasks.length > 0 && (
+            <a className="small" href={href(`/projects/${id}/tasks`, { late: "1" })}>
+              Voir {d.late_tasks.length >= 50 ? "toutes les" : `les ${d.late_tasks.length}`} tâches en retard
+            </a>
+          )}
+        </div>
+        {watch.length ? (
+          <div className="list">
+            {watch.slice(0, 5).map(({ t, why }) => (
+              <div key={t.id} className="row">
+                <span className="primary">{taskName(t)} <span className="faint">· {linkName(t.entity)}</span></span>
+                <span className="secondary">
+                  {[linkName(t.step), linkNames(t.task_assignees).join(", ") || "non assignée"].filter(Boolean).join(" · ")}
+                  {" · "}
+                  <Status code={t.sg_status_list} labels={labels} />
+                </span>
+                <span className="aside">{why}</span>
+              </div>
+            ))}
           </div>
-          {d.steps.length ? (
-            d.steps.map((s) => {
+        ) : (
+          <p className="muted">Rien à signaler : aucune tâche en retard ni bloquée.</p>
+        )}
+      </section>
+
+      <section>
+        <div className="section-head">
+          <h2 className="h3">Avancement par étape</h2>
+          <Legend keys={["done", "review", "in_progress", "waiting"]} />
+        </div>
+        {d.steps.length ? (
+          <>
+            {steps.map((s) => {
               const total = s.done + s.review + s.in_progress + s.waiting + s.other;
               return (
                 <a key={s.step} className="matrix-row" href={s.step_id ? href(`/projects/${id}/tasks`, { step: s.step_id }) : href(`/projects/${id}/tasks`)}>
                   <span className="label">{s.step}</span>
                   <StatusBar counts={s} />
-                  <span className="n">{Math.round((s.done / total) * 100)} % · {num(total)}</span>
+                  <span className="n">{Math.round((s.done / total) * 100)} %</span>
                 </a>
               );
-            })
-          ) : (
-            <Empty>Aucune tâche dans cette production.</Empty>
-          )}
-        </section>
-
-        <section className="section">
-          <div className="section-head">
-            <h2 className="h3">En retard</h2>
-            {d.late_tasks.length > 0 && <a className="small" href={href(`/projects/${id}/tasks`, { late: "1" })}>Voir tout</a>}
-          </div>
-          {d.late_tasks.length ? (
-            <div className="list">
-              {d.late_tasks.slice(0, 10).map((t) => (
-                <div key={t.id} className="row">
-                  <span className="primary">{taskName(t)} <span className="faint">· {linkName(t.entity)}</span></span>
-                  <span className="secondary">{linkName(t.step)} · {linkNames(t.task_assignees).join(", ") || "non assignée"} · <Status code={t.sg_status_list} labels={labels} /></span>
-                  <span className="aside"><LateChip days={daysLate(t.due_date)} /></span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="muted">Aucune tâche en retard.</p>
-          )}
-        </section>
-
-        {d.blocked_tasks.length > 0 && (
-          <section className="section">
-            <div className="section-head">
-              <h2 className="h3">Bloquées par une tâche amont</h2>
-              <a className="small" href={href(`/projects/${id}/tasks`, { blocked: "1" })}>Voir tout</a>
-            </div>
-            <div className="list">
-              {d.blocked_tasks.slice(0, 8).map((t) => (
-                <div key={t.id} className="row">
-                  <span className="primary">{taskName(t)}</span>
-                  <span className="secondary">attend {linkNames(t.upstream_tasks).join(", ")}</span>
-                  <span className="aside"><Status code={t.sg_status_list} labels={labels} /></span>
-                </div>
-              ))}
-            </div>
-          </section>
+            })}
+            {d.steps.length > 6 && (
+              <button className="btn ghost" style={{ marginTop: 8 }} onClick={() => setShowAllSteps((v) => !v)}>
+                {showAllSteps ? "Afficher moins" : `Afficher les ${d.steps.length} étapes`}
+              </button>
+            )}
+          </>
+        ) : (
+          <Empty>Aucune tâche dans cette production.</Empty>
         )}
-      </div>
+      </section>
+    </div>
+  );
+}
 
-      <div>
-        {d.sequences.length > 0 && (
-          <section className="section">
-            <div className="section-head">
-              <h2 className="h3">Séquences</h2>
-              <span className="faint small">Avancement des plans</span>
-            </div>
-            {d.sequences.map((s) => (
-              <a key={s.id} className="matrix-row" href={href(`/projects/${id}/shots`, { seq: s.id })}>
-                <span className="label">{s.name}</span>
-                <StatusBar counts={s.shots} unit="plan" units="plans" />
-                <span className="n">{num(Object.values(s.shots).reduce((a, b) => a + b, 0))}</span>
-              </a>
-            ))}
-          </section>
-        )}
-
-        <section className="section">
-          <h2 className="h3" style={{ marginBottom: 10 }}>Équipe</h2>
-          {d.people.length ? (
-            <div className="list">
-              {d.people.slice(0, 12).map((u) => (
-                <div key={u.id} className="row">
-                  <a className="primary" href={href(`/people/${u.id}`)}>{u.name}</a>
-                  <span className="aside muted">{u.open} ouvertes / {u.tasks}</span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="muted">Aucune tâche assignée.</p>
-          )}
-        </section>
-
-        <section className="section">
-          <div className="section-head">
-            <h2 className="h3">Dernières notes</h2>
-            <a className="small" href={href(`/projects/${id}/notes`)}>Toutes les notes</a>
-          </div>
-          {d.recent_notes.length ? (
-            <div className="feed">
-              {d.recent_notes.slice(0, 5).map((n) => (
-                <article key={n.id} className="feed-item">
-                  <div style={{ fontWeight: 550 }}>{n.subject || "Note"}</div>
-                  <div className="who">{linkName(n.user)}, {relTime(n.created_at)}</div>
-                  {n.content && <p>{n.content}</p>}
-                </article>
-              ))}
-            </div>
-          ) : (
-            <p className="muted">Aucune note.</p>
-          )}
-        </section>
-      </div>
+function Team({ d, id }) {
+  if (!d.people.length) return <Empty>Aucune tâche n'est assignée dans cette production.</Empty>;
+  return (
+    <div className="table-wrap">
+      <table className="data">
+        <thead>
+          <tr><th>Personne</th><th className="num">Tâches ouvertes</th><th className="num">Total</th><th aria-label="Voir les tâches" /></tr>
+        </thead>
+        <tbody>
+          {d.people.map((u) => (
+            <tr key={u.id}>
+              <td><a href={href(`/people/${u.id}`)}>{u.name}</a></td>
+              <td className="num">{num(u.open)}</td>
+              <td className="num muted">{num(u.tasks)}</td>
+              <td className="num"><a className="small" href={href(`/projects/${id}/tasks`, { person: u.id })}>Ses tâches</a></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -206,7 +188,7 @@ function Shots({ d, id, query, setQuery }) {
   );
   return (
     <div>
-      {d.sequences.length > 0 && (
+      {d.sequences.length > 1 && (
         <div className="toolbar">
           <select className="select" value={seq || ""} onChange={(e) => setQuery({ seq: e.target.value })} aria-label="Séquence">
             <option value="">Toutes les séquences</option>
@@ -232,7 +214,6 @@ function Shots({ d, id, query, setQuery }) {
                   <span className="name">{recordName(s)}</span>
                   <Status code={s.sg_status_list} labels={labels} />
                 </div>
-                {s.description && <span className="faint small">{String(s.description).slice(0, 80)}</span>}
               </a>
             ))}
           </div>
@@ -245,7 +226,7 @@ function Shots({ d, id, query, setQuery }) {
 
 function Gallery({ entityType, id, sort = "name" }) {
   const { labels } = useApp();
-  const [page, setPage] = React.useState(1);
+  const [page, setPage] = useState(1);
   const data = useData(() => api.records(entityType, { project_id: id, sort, page, limit: 48 }), [entityType, id, page]);
   if (data.error) return <ErrorBox error={data.error} onRetry={data.reload} />;
   if (!data.data) return <LoadingRows />;
@@ -261,7 +242,7 @@ function Gallery({ entityType, id, sort = "name" }) {
               <Status code={r.sg_status_list} labels={labels} />
             </div>
             <span className="faint small">
-              {[linkName(r.entity), linkName(r.user), linkName(r.sg_asset_type)].filter(Boolean).join(", ")}
+              {[linkName(r.entity), linkName(r.user)].filter(Boolean).join(", ")}
               {entityType === "Version" && r.created_at ? `, ${relTime(r.created_at)}` : ""}
             </span>
           </a>
@@ -273,7 +254,7 @@ function Gallery({ entityType, id, sort = "name" }) {
 }
 
 function Notes({ id }) {
-  const [page, setPage] = React.useState(1);
+  const [page, setPage] = useState(1);
   const notes = useData(() => api.records("Note", { project_id: id, sort: "recent", page, limit: 30 }), [id, page]);
   if (notes.error) return <ErrorBox error={notes.error} onRetry={notes.reload} />;
   if (!notes.data) return <LoadingRows />;
@@ -289,10 +270,9 @@ function Notes({ id }) {
             </span>
           </div>
           {n.content && <p className="note-body">{n.content}</p>}
-          {(n.note_links?.length > 0 || n.addressings_to?.length > 0) && (
+          {n.note_links?.length > 0 && (
             <div className="note-links">
               {linkNames(n.note_links).map((l) => <span key={l} className="pill">{l}</span>)}
-              {linkNames(n.addressings_to).length > 0 && <span className="faint small">pour {linkNames(n.addressings_to).join(", ")}</span>}
             </div>
           )}
         </article>

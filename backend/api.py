@@ -4,10 +4,12 @@ import threading
 import time
 from typing import Any, Optional
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 
 from backend import shotgrid, sync
+from backend.auth import require_admin, require_user
 from backend.db import database
+from backend.users import User
 from backend.records import REVIEW_STATUSES, present, status_bucket
 from backend.retrieval import DONE_SQL, Scope, _filters
 
@@ -38,8 +40,8 @@ async def health() -> dict[str, str]:
 
 
 @router.get("/api/dashboard")
-def dashboard() -> dict[str, Any]:
-    c = database()
+def dashboard(user: User = Depends(require_user)) -> dict[str, Any]:
+    c = database(user.visible_projects)
     try:
         projects = _rows(c.execute(
             "SELECT entity_type, data_json FROM shotgrid_records WHERE entity_type='Project' "
@@ -101,8 +103,8 @@ def dashboard() -> dict[str, Any]:
 
 
 @router.get("/api/projects/{project_id}")
-def project_details(project_id: int) -> dict[str, Any]:
-    c = database()
+def project_details(project_id: int, user: User = Depends(require_user)) -> dict[str, Any]:
+    c = database(user.visible_projects)
     try:
         row = c.execute(
             "SELECT data_json FROM shotgrid_records WHERE entity_type='Project' AND entity_id=?", (project_id,)
@@ -225,13 +227,14 @@ def records(
     sequence_id: Optional[int] = None,
     step_id: Optional[int] = None,
     person_id: Optional[int] = None,
-    bucket: Optional[str] = Query(None, pattern="^(done|review|in_progress|waiting)$"),
+    bucket: Optional[str] = Query(None, pattern="^(open|done|review|in_progress|waiting)$"),
     late: bool = False,
     blocked: bool = False,
     search: Optional[str] = None,
     sort: str = Query("name", pattern="^(name|due|recent|updated)$"),
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=200),
+    user: User = Depends(require_user),
 ) -> dict[str, Any]:
     scope = Scope(
         project={"id": project_id, "name": ""} if project_id else None,
@@ -245,7 +248,7 @@ def records(
         terms = " ".join(f'"{w}"*' for w in search.replace('"', " ").split()[:6])
         where += " AND r.rowid IN (SELECT rowid FROM shotgrid_fts WHERE shotgrid_fts MATCH ?)"
         params.append(terms)
-    c = database()
+    c = database(user.visible_projects)
     try:
         total = c.execute(f"SELECT COUNT(*) FROM shotgrid_records r WHERE {where}", params).fetchone()[0]
         rows = c.execute(
@@ -265,8 +268,8 @@ def records(
 
 
 @router.get("/api/people")
-def people() -> dict[str, Any]:
-    c = database()
+def people(user: User = Depends(require_user)) -> dict[str, Any]:
+    c = database(user.visible_projects)
     try:
         rows = c.execute(
             f"""
@@ -302,8 +305,8 @@ def people() -> dict[str, Any]:
 
 
 @router.get("/api/people/{person_id}")
-def person(person_id: int) -> dict[str, Any]:
-    c = database()
+def person(person_id: int, user: User = Depends(require_user)) -> dict[str, Any]:
+    c = database(user.visible_projects)
     try:
         row = c.execute(
             "SELECT data_json FROM shotgrid_records WHERE entity_type='HumanUser' AND entity_id=?", (person_id,)
@@ -331,9 +334,10 @@ def person(person_id: int) -> dict[str, Any]:
 
 
 @router.get("/api/search")
-def search(q: str = Query(..., min_length=2), limit: int = Query(20, ge=1, le=50)) -> dict[str, Any]:
+def search(q: str = Query(..., min_length=2), limit: int = Query(20, ge=1, le=50),
+           user: User = Depends(require_user)) -> dict[str, Any]:
     terms = " ".join(f'"{w}"*' for w in q.replace('"', " ").split()[:6])
-    c = database()
+    c = database(user.visible_projects)
     try:
         rows = c.execute(
             """
@@ -365,12 +369,12 @@ def status_labels() -> dict[str, dict[str, str]]:
 
 
 @router.get("/api/statuses")
-def statuses() -> dict[str, Any]:
+def statuses(_user: User = Depends(require_user)) -> dict[str, Any]:
     return {"statuses": status_labels()}
 
 
 @router.get("/api/entity-types")
-def entity_types() -> dict[str, Any]:
+def entity_types(_admin: User = Depends(require_admin)) -> dict[str, Any]:
     c = database()
     try:
         rows = c.execute(
@@ -386,7 +390,8 @@ def entity_types() -> dict[str, Any]:
 
 @router.post("/api/sync")
 def start_sync(background_tasks: BackgroundTasks,
-               mode: str = Query("auto", pattern="^(auto|full|incremental)$")) -> dict[str, Any]:
+               mode: str = Query("auto", pattern="^(auto|full|incremental)$"),
+               _admin: User = Depends(require_admin)) -> dict[str, Any]:
     c = database()
     try:
         run_id = sync.start_sync_run(c, mode)
@@ -399,7 +404,7 @@ def start_sync(background_tasks: BackgroundTasks,
 
 
 @router.get("/api/sync/status")
-def sync_status() -> dict[str, Any]:
+def sync_status(_user: User = Depends(require_user)) -> dict[str, Any]:
     c = database()
     try:
         row = c.execute(
@@ -412,7 +417,7 @@ def sync_status() -> dict[str, Any]:
 
 
 @router.get("/api/sync/runs")
-def sync_runs(limit: int = Query(20, ge=1, le=100)) -> dict[str, Any]:
+def sync_runs(limit: int = Query(20, ge=1, le=100), _admin: User = Depends(require_admin)) -> dict[str, Any]:
     c = database()
     try:
         rows = c.execute(
@@ -426,7 +431,7 @@ def sync_runs(limit: int = Query(20, ge=1, le=100)) -> dict[str, Any]:
 
 
 @router.get("/api/sync/audit")
-def sync_audit(include_unsynced: bool = False) -> dict[str, Any]:
+def sync_audit(include_unsynced: bool = False, _admin: User = Depends(require_admin)) -> dict[str, Any]:
     return sync.audit_shotgrid(include_unsynced=include_unsynced)
 
 
@@ -442,10 +447,24 @@ _thumb_client = None
 def thumbnails(
     entity_type: str = Query(..., pattern="^[A-Za-z0-9_]+$"),
     ids: str = Query(..., description="Comma-separated ids"),
+    user: User = Depends(require_user),
 ) -> dict[str, Optional[str]]:
-    """Fresh (non-expired) thumbnail URLs, fetched from ShotGrid in one batch and cached."""
+    """Fresh (non-expired) thumbnail URLs, fetched from ShotGrid in one batch and cached.
+
+    Only ids the user may see are looked up; the others are silently dropped.
+    """
     global _thumb_client
-    wanted = [int(i) for i in ids.split(",") if i.strip().isdigit()][:100]
+    requested = [int(i) for i in ids.split(",") if i.strip().isdigit()][:100]
+    c = database(user.visible_projects)
+    try:
+        marks = ",".join("?" * len(requested)) or "NULL"
+        visible = {r[0] for r in c.execute(
+            f"SELECT entity_id FROM shotgrid_records WHERE entity_type=? AND entity_id IN ({marks})",
+            [entity_type, *requested],
+        )}
+    finally:
+        c.close()
+    wanted = [i for i in requested if i in visible]
     now = time.time()
     result: dict[str, Optional[str]] = {}
     missing = []

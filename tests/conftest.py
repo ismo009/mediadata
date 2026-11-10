@@ -76,12 +76,20 @@ def task(tid, content, *, step=None, shot=None, assignee=None, status="wtg", due
     }
 
 
+def human(uid, name, email, role, status="act", login=None):
+    first, last = name.split(" ", 1)
+    return {"id": uid, "type": "HumanUser", "name": name, "firstname": first, "lastname": last,
+            "email": email, "login": login or email.split("@")[0], "sg_status_list": status,
+            "permission_rule_set": {"type": "PermissionRuleSet", "id": 1, "name": role}, "updated_at": T0}
+
+
 def sample_data():
     comp, anim = link("Step", 30, "Compositing"), link("Step", 31, "Animation")
     marie = link("HumanUser", 40, "Marie Curie")
     sh20, sh21 = link("Shot", 20, "SH020"), link("Shot", 21, "SH021")
     return {
-        "Project": [project(1, name="Les Cocottes en Papier"), project(2, name="Vieux Projet", archived=True)],
+        "Project": [project(1, name="Les Cocottes en Papier", users=[marie]),
+                    project(2, name="Vieux Projet", archived=True, users=[link("HumanUser", 41, "Paul Martin")])],
         "Sequence": [{"id": 10, "type": "Sequence", "code": "SQ010", "project": link("Project", 1),
                       "updated_at": T0}],
         "Shot": [
@@ -94,8 +102,15 @@ def sample_data():
             {"id": 30, "type": "Step", "code": "Compositing", "short_name": "Comp", "updated_at": T0},
             {"id": 31, "type": "Step", "code": "Animation", "short_name": "Anim", "updated_at": T0},
         ],
-        "HumanUser": [{"id": 40, "type": "HumanUser", "name": "Marie Curie", "firstname": "Marie",
-                       "lastname": "Curie", "sg_status_list": "act", "updated_at": T0}],
+        "HumanUser": [
+            human(40, "Marie Curie", "marie@studio.test", "Admin"),
+            human(41, "Paul Martin", "paul@studio.test", "Artist"),
+            human(42, "Ancien Compte", "ancien@studio.test", "Artist", status="dis"),
+            human(43, "Double Un", "double@studio.test", "Artist", login="double1"),
+            human(44, "Double Deux", "double@studio.test", "Artist", login="double@studio.test"),
+            human(45, "Triple Un", "triple@studio.test", "Artist", login="triple1"),
+            human(46, "Triple Deux", "triple@studio.test", "Artist", login="triple2"),
+        ],
         "Task": [
             task(100, "comp sh020", step=comp, shot=sh20, assignee=marie, status="ip", due="2020-01-01",
                  upstream=[101]),
@@ -123,6 +138,10 @@ def fake(monkeypatch, tmp_path):
             shotgrid_url="https://example.shotgrid.test",
             sync_entities="auto",
             sync_interval_minutes=0,
+            app_base_url="http://localhost:8000",
+            dev_login_as="",
+            aps_client_id="",
+            aps_client_secret="",
         ),
     )
     from backend import sync
@@ -136,3 +155,23 @@ def fake(monkeypatch, tmp_path):
 
 def later(minutes=60):
     return datetime.now(timezone.utc) + timedelta(minutes=minutes)
+
+
+def sign_in(http, monkeypatch, who: str) -> None:
+    """Sign the TestClient in as a ShotGrid user (through the localhost dev login)."""
+    http.post("/auth/logout")
+    monkeypatch.setattr(config, "settings", dataclasses.replace(config.settings, dev_login_as=who))
+    response = http.get("/auth/dev-login", follow_redirects=False)
+    assert response.status_code == 303 and response.headers["location"] == "/", response.text
+
+
+@pytest.fixture
+def http(fake, monkeypatch):
+    """TestClient on synced data, signed in as Marie (Admin: sees everything)."""
+    from fastapi.testclient import TestClient
+
+    from backend import main, sync
+    sync.sync_shotgrid(mode="full")
+    with TestClient(main.app) as client:
+        sign_in(client, monkeypatch, "marie@studio.test")
+        yield client
