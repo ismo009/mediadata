@@ -1,0 +1,26 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "mediadata",
+      "runtimeExecutable": "C:\\Users\\isrop\\AppData\\Local\\Microsoft\\WindowsApps\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\python.exe",
+      "runtimeArgs": [
+        "-m",
+        "uvicorn",
+        "backend.main:app",
+        "--port",
+        "8000"
+      ],
+      "port": 8000
+    },
+    {
+      "name": "mediadata-dev-login",
+      "runtimeExecutable": "C:\\Users\\isrop\\AppData\\Local\\Microsoft\\WindowsApps\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\python.exe",
+      "runtimeArgs": [
+        "-c",
+        "import os, dotenv; dotenv.load_dotenv(); os.environ['DEV_LOGIN_AS'] = os.environ.get('DEV_LOGIN_AS') or os.environ.get('SHOTGRID_LOGIN', ''); import uvicorn; uvicorn.run('backend.main:app', port=8010)"
+      ],
+      "port": 8010
+    }
+  ]
+}

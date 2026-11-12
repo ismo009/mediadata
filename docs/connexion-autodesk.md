@@ -124,6 +124,37 @@ Pour que d'autres personnes s'y connectent, MedIAData doit tourner sur une machi
 
 La connexion de développement disparaît automatiquement dès que `APP_BASE_URL` n'est plus `localhost`.
 
+### Variante rapide : partager depuis son poste avec Tailscale
+
+Pour faire tester l'application à quelques coéquipiers sans serveur ni nom de domaine, [Tailscale](https://tailscale.com) donne à votre poste une adresse HTTPS privée (`https://<machine>.<tailnet>.ts.net`). Aucun port n'est ouvert sur votre réseau et le pare-feu Windows n'est pas modifié : Tailscale relaie lui-même les connexions vers `localhost:8000`.
+
+1. **Activez le HTTPS dans votre tailnet** : sur [login.tailscale.com/admin/dns](https://login.tailscale.com/admin/dns), activez **MagicDNS** puis **HTTPS Certificates**.
+2. **Donnez accès à vos coéquipiers**, au choix :
+   - **Serve (privé, recommandé)** : chaque coéquipier installe Tailscale. Ensuite, invitez-le dans votre tailnet (*Users > Invite users*), ou partagez seulement votre machine (*Machines >* votre poste *> Share*). L'application n'est visible que d'eux.
+   - **Funnel (public)** : l'adresse est accessible depuis Internet, sans rien installer chez les coéquipiers. Il faut autoriser Funnel dans la politique d'accès du tailnet. Seule la connexion Autodesk protège alors l'application.
+3. **Publiez le port 8000** (MedIAData continue d'écouter sur `127.0.0.1`) :
+   ```powershell
+   tailscale serve --bg 8000
+   ```
+   ou, pour Funnel :
+   ```powershell
+   tailscale funnel --bg 8000
+   ```
+   `tailscale serve status` affiche l'adresse publiée ; `tailscale serve reset` arrête le partage.
+4. **Mettez à jour `.env`** avec cette adresse, puis redémarrez MedIAData :
+   ```env
+   APP_BASE_URL=https://<machine>.<tailnet>.ts.net
+   ```
+5. **Ajoutez l'URL de rappel** `https://<machine>.<tailnet>.ts.net/auth/autodesk/callback` dans l'application Autodesk (gardez la version `localhost` si vous voulez).
+6. Lancez `python scripts/check_login_setup.py` : il doit confirmer qu'Autodesk accepte la nouvelle URL de rappel.
+
+À partir de là, utilisez vous aussi l'adresse `https://…ts.net` : avec `APP_BASE_URL` en HTTPS, la connexion par `http://localhost:8000` ne fonctionne plus.
+
+**Ollama** : par défaut, il peut écouter sur toutes les interfaces réseau, sans mot de passe. Si c'est le cas (`netstat -an | findstr 11434` affiche `0.0.0.0:11434` ou `[::]:11434`), limitez-le à la machine elle-même, puis redémarrez Ollama :
+```powershell
+setx OLLAMA_HOST 127.0.0.1:11434
+```
+
 ## Étape 7 — Vérifier les droits
 
 Le script de vérification affiche ce que verra chaque groupe ShotGrid :

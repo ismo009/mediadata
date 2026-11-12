@@ -4,6 +4,7 @@ import { ArrowUp, Square, Trash2, X } from "lucide-react";
 import { api, streamChat } from "../api";
 import { useApp } from "../App";
 import { num } from "../lib";
+import { LiaLogo, LiaMark } from "./LiaLogo";
 
 const KIND = { Project: "Production", Task: "Tâche", Shot: "Plan", Sequence: "Séquence", Asset: "Asset",
   Version: "Version", Note: "Note", HumanUser: "Personne", TimeLog: "Temps", Playlist: "Playlist" };
@@ -100,7 +101,7 @@ export default function Assistant({ projectId, onClose }) {
   return (
     <aside className="assistant" aria-label="Assistante Lia">
       <div className="assistant-head">
-        <span className="title">Lia</span>
+        <LiaLogo height={26} />
         <span className="faint small" style={{ flex: 1 }}>{name ? `Contexte : ${name}` : "Toutes les productions"}</span>
         {messages.length > 0 && (
           <button className="btn icon ghost" onClick={() => setMessages([])} disabled={busy} aria-label="Effacer la conversation" title="Effacer la conversation">
@@ -114,7 +115,8 @@ export default function Assistant({ projectId, onClose }) {
 
       <div className="assistant-log" ref={logRef} aria-live="polite">
         {messages.length === 0 && (
-          <div style={{ display: "grid", gap: 14 }}>
+          <div className="lia-welcome">
+            <LiaMark size={56} />
             <p className="muted" style={{ margin: 0 }}>
               Posez une question sur les productions. Lia répond à partir de la copie locale de ShotGrid et cite ses sources.
             </p>
@@ -130,6 +132,8 @@ export default function Assistant({ projectId, onClose }) {
             <div key={i} className="msg-user">{m.content}</div>
           ) : (
             <div key={i} className="msg-bot">
+              <LiaMark size={26} />
+              <div className="bot-body">
               <div className={`md ${m.error ? "late-text" : ""}`}>
                 {m.content ? (
                   <ReactMarkdown components={{ a: (props) => <a {...props} target="_blank" rel="noreferrer" /> }}>{m.content}</ReactMarkdown>
@@ -139,6 +143,7 @@ export default function Assistant({ projectId, onClose }) {
                 {m.streaming && m.content && <span className="cursor" aria-hidden="true" />}
               </div>
               {m.sources && <Sources sources={m.sources} />}
+              </div>
             </div>
           )
         )}

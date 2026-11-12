@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Logo Lia</title>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,300..800&display=swap" rel="stylesheet">
+<style>
+  :root { --ink:#1d1e20; --muted:#55575c; --line:#dcdcd7; --bg:#f4f4f2; --raised:#fff; --night:#1c1d20; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: "Archivo", system-ui, sans-serif; }
+  main { max-width: 1040px; margin: 0 auto; padding: 40px 24px 80px; }
+  h1 { font-stretch: 118%; font-size: 32px; margin: 0 0 6px; }
+  h2 { font-stretch: 112%; font-size: 16px; margin: 44px 0 14px; }
+  p { color: var(--muted); margin: 0; max-width: 70ch; line-height: 1.5; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .tile { border-radius: 12px; padding: 40px; display: grid; place-items: center; min-height: 220px; border: 1px solid var(--line); background: var(--raised); }
+  .tile.dark { background: var(--night); border-color: #2c2d31; }
+  .tile.photo { background: linear-gradient(135deg, #e9d8c3, #b9c7d6 60%, #8aa2b8); }
+  .tile img { max-width: 100%; }
+  .sizes { display: flex; align-items: end; gap: 28px; flex-wrap: wrap; background: var(--raised); border: 1px solid var(--line); border-radius: 12px; padding: 28px; }
+  .sizes figure { margin: 0; display: grid; gap: 8px; justify-items: center; color: var(--muted); font-size: 12px; }
+  .label { font-size: 12.5px; color: var(--muted); margin-top: 8px; }
+  /* in context */
+  .app { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--raised); }
+  .bar { display: flex; align-items: center; gap: 10px; height: 56px; padding: 0 20px; border-bottom: 1px solid var(--line); }
+  .bar .brand { font-stretch: 125%; font-weight: 750; letter-spacing: -.02em; margin-right: 16px; }
+  .bar nav { display: flex; gap: 18px; color: var(--muted); font-size: 14px; }
+  .bar .grow { flex: 1; }
+  .ask { display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px; border: 1px solid #c4c4be; border-radius: 4px; font-size: 14px; }
+  .panel { display: grid; grid-template-columns: 1fr 340px; min-height: 260px; }
+  .panel .side { border-left: 1px solid var(--line); padding: 14px; display: grid; align-content: start; gap: 14px; }
+  .panel .head { display: flex; align-items: center; gap: 10px; }
+  .panel .head strong { font-stretch: 118%; font-size: 16px; }
+  .msg { background: #f4f4f2; border-radius: 12px 12px 3px 12px; padding: 8px 12px; justify-self: end; font-size: 14px; }
+  .bot { display: grid; grid-template-columns: 28px 1fr; gap: 10px; font-size: 14px; color: var(--ink); line-height: 1.5; }
+  .tab { display: inline-flex; align-items: center; gap: 8px; background: #e7e7e3; border-radius: 8px 8px 0 0; padding: 8px 14px; font-size: 13px; }
+  .palette { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  .swatch { border-radius: 10px; border: 1px solid var(--line); overflow: hidden; background: var(--raised); font-size: 13px; }
+  .swatch div { height: 64px; }
+  .swatch span { display: block; padding: 8px 10px; }
+  @media (max-width: 720px) { .row, .palette { grid-template-columns: 1fr; } .panel { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Logo Lia</h1>
+  <p>Un clap de cinéma dont le corps est une bulle de dialogue, avec une étincelle : la production audiovisuelle, la conversation et l'IA en un seul signe. Les bandes du clap sont de vrais trous, donc le symbole fonctionne sur n'importe quel fond.</p>
+
+  <h2>Logo complet</h2>
+  <div class="row">
+    <div><div class="tile"><img src="../../frontend/public/brand/lia-logo.svg" width="330" alt="Logo Lia sur fond clair"></div><div class="label">lia-logo.svg, fonds clairs</div></div>
+    <div><div class="tile dark"><img src="../../frontend/public/brand/lia-logo-sombre.svg" width="330" alt="Logo Lia sur fond sombre"></div><div class="label">lia-logo-sombre.svg, fonds sombres</div></div>
+  </div>
+
+  <h2>Symbole seul</h2>
+  <div class="row">
+    <div><div class="tile"><img src="../../frontend/public/brand/lia-symbole.svg" width="170" alt="Symbole Lia"></div><div class="label">lia-symbole.svg</div></div>
+    <div><div class="tile photo"><img src="../../frontend/public/brand/lia-symbole.svg" width="170" alt="Symbole Lia sur image"></div><div class="label">Sur une image : les bandes laissent voir le fond</div></div>
+  </div>
+
+  <h2>Une seule couleur et icône d'application</h2>
+  <div class="row">
+    <div><div class="tile" style="color:#0F2A44"><img src="../../frontend/public/brand/lia-symbole-mono.svg" width="150" alt="Symbole Lia une couleur" style="filter: none"></div><div class="label">lia-symbole-mono.svg : impression, tampon, broderie (prend la couleur du texte)</div></div>
+    <div><div class="tile"><img src="../../frontend/public/brand/lia-icone.svg" width="150" alt="Icône Lia"></div><div class="label">lia-icone.svg : favicon, icône d'application, avatar</div></div>
+  </div>
+
+  <h2>Tailles réelles</h2>
+  <div class="sizes">
+    <figure><img src="../../frontend/public/brand/lia-icone.svg" width="16" alt=""><figcaption>16 px</figcaption></figure>
+    <figure><img src="../../frontend/public/brand/lia-icone.svg" width="24" alt=""><figcaption>24 px</figcaption></figure>
+    <figure><img src="../../frontend/public/brand/lia-icone.svg" width="32" alt=""><figcaption>32 px</figcaption></figure>
+    <figure><img src="../../frontend/public/brand/lia-icone.svg" width="64" alt=""><figcaption>64 px</figcaption></figure>
+    <figure><img src="../../frontend/public/brand/lia-symbole.svg" width="24" alt=""><figcaption>symbole 24 px</figcaption></figure>
+    <figure><img src="../../frontend/public/brand/lia-symbole.svg" width="40" alt=""><figcaption>symbole 40 px</figcaption></figure>
+    <figure><img src="../../frontend/public/brand/lia-logo.svg" width="90" alt=""><figcaption>logo 90 px</figcaption></figure>
+    <figure><img src="../../frontend/public/brand/lia-logo.svg" width="160" alt=""><figcaption>logo 160 px</figcaption></figure>
+  </div>
+
+  <h2>Dans MedIAData</h2>
+  <div class="app">
+    <div class="bar">
+      <span class="brand">MedIAData</span>
+      <nav><span>Productions</span><span>Mes tâches</span><span>Équipe</span></nav>
+      <div class="grow"></div>
+      <span class="ask"><img src="../../frontend/public/brand/lia-symbole.svg" width="20" alt="">Demander à Lia</span>
+    </div>
+    <div class="panel">
+      <div></div>
+      <div class="side">
+        <div class="head"><img src="../../frontend/public/brand/lia-logo.svg" height="26" alt="Lia"></div>
+        <div class="msg">Quelles sont mes tâches en retard ?</div>
+        <div class="bot"><img src="../../frontend/public/brand/lia-icone.svg" width="28" alt=""><span>Vous avez 2 tâches en retard sur Les Cocottes en Papier : Dérushage et Première version, toutes deux de 15 jours.</span></div>
+      </div>
+    </div>
+  </div>
+  <p style="margin-top:14px"><span class="tab"><img src="../../frontend/public/brand/lia-icone.svg" width="16" alt="">MedIAData</span> onglet du navigateur</p>
+
+  <h2>Couleurs</h2>
+  <div class="palette">
+    <div class="swatch"><div style="background:#1E90E8"></div><span><b>Bleu Lia</b> #1E90E8</span></div>
+    <div class="swatch"><div style="background:#0F2A44"></div><span><b>Encre</b> #0F2A44</span></div>
+    <div class="swatch"><div style="background:#3BA3F5"></div><span><b>Bleu sur fond sombre</b> #3BA3F5</span></div>
+    <div class="swatch"><div style="background:#EEF5FC"></div><span><b>Encre sur fond sombre</b> #EEF5FC</span></div>
+  </div>
+</main>
+</body>
+</html>

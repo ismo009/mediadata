@@ -22,6 +22,10 @@
   --s-other: #dcdbd5;
   --late: #c93434;
   --late-bg: rgba(201, 52, 52, 0.08);
+  /* Lia logo */
+  --lia-ink: #0f2a44;
+  --lia-blue: #1e90e8;
+  --lia-spark: #ffffff;
 
   --font: "Archivo", system-ui, sans-serif;
   --r-sm: 4px;
@@ -50,6 +54,8 @@
     --s-other: #46474c;
     --late: #ef7777;
     --late-bg: rgba(239, 119, 119, 0.12);
+  --lia-ink: #eef5fc;
+  --lia-blue: #3ba3f5;
   }
 }
 :root[data-theme="dark"] {
@@ -72,6 +78,8 @@
   --s-other: #46474c;
   --late: #ef7777;
   --late-bg: rgba(239, 119, 119, 0.12);
+  --lia-ink: #eef5fc;
+  --lia-blue: #3ba3f5;
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -502,6 +510,16 @@ kbd { font-family: var(--font); font-size: 11.5px; border: 1px solid var(--line-
 
 /* ---------- sync page ---------- */
 .ok { color: var(--s-done); }
+
+/* ---------- Lia logo ---------- */
+.lia-mark { display: block; flex: none; }
+/* On a pressed (inverted) button the logo's dark parts follow the button text colour. */
+.btn[aria-pressed="true"] .lia-mark { --lia-ink: var(--bg); }
+.assistant-head .lia-mark { margin-right: 2px; }
+.lia-welcome { display: grid; gap: 14px; justify-items: start; }
+.msg-bot { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 10px; align-items: start; }
+.msg-bot > .lia-mark { margin-top: 1px; }
+.msg-bot > .bot-body { min-width: 0; }
 
 /* ---------- sign-in & account ---------- */
 .login { min-height: 100%; display: grid; place-items: center; padding: 32px 16px; }

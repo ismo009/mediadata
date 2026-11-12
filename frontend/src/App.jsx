@@ -1,8 +1,9 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { LogOut, Moon, RefreshCw, Search, Sparkles, Sun } from "lucide-react";
+import { LogOut, Moon, RefreshCw, Search, Sun } from "lucide-react";
 import { api } from "./api";
 import { href, relTime, useData, useRoute } from "./lib";
 import SearchPalette from "./components/SearchPalette";
+import { LiaMark } from "./components/LiaLogo";
 import Assistant from "./components/Assistant";
 import LoginPage from "./pages/LoginPage";
 import MyTasksPage from "./pages/MyTasksPage";
@@ -179,7 +180,7 @@ function Workspace({ me, theme, setTheme, onSignOut }) {
               {theme === "dark" ? <Moon size={17} /> : <Sun size={17} />}
             </button>
             <button className="btn" aria-pressed={assistantOpen} onClick={() => setAssistantOpen((o) => !o)}>
-              <Sparkles size={15} />
+              <LiaMark size={20} />
               <span className="hide-mobile">Demander à Lia</span>
               <span className="only-mobile">Lia</span>
             </button>
