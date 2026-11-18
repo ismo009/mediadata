@@ -1,5 +1,7 @@
 # MedIAData
 
+[![CI](https://github.com/ismo009/mediadata/actions/workflows/ci.yml/badge.svg)](https://github.com/ismo009/mediadata/actions/workflows/ci.yml)
+
 Tableau de bord local pour suivre des productions d'animation, de VFX et de tournage à partir d'**Autodesk ShotGrid** (Flow Production Tracking), avec **Lia**, une assistante qui répond aux questions en langage naturel grâce à un modèle **Ollama** exécuté sur la machine.
 
 L'application garde une copie locale de ShotGrid dans SQLite, synchronisée automatiquement. L'interface et l'assistante lisent cette copie : tout est rapide, et rien n'est jamais modifié dans ShotGrid. Chaque personne se connecte avec son compte Autodesk et ne voit que les productions auxquelles elle a droit.
